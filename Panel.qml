@@ -13,6 +13,8 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
   property var powerplanService: null
+  // TEMPORARY, remove once trackpad scroll sensitivity is tuned correctly.
+  property string debugWheelText: "scroll to see wheel event values"
   readonly property var barIdentity: hostWidget || root
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
@@ -102,22 +104,17 @@ Panel {
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         WheelHandler {
-          // A trackpad on Wayland reports real pixel counts via pixelDelta,
-          // not the coarse angleDelta a mouse wheel sends. A bare 1:1
-          // pixelDelta mapping tracked gesture size proportionally but
-          // still felt too slow on real hardware, so trackpadSensitivity
-          // boosts it to a comfortable feel. Tune this single number if it
-          // still feels off in either direction. Falls back to angleDelta
-          // / 120 (Qt's one-notch unit) for a real mouse wheel, keeping a
-          // single click at the original 56px.
-          readonly property real trackpadSensitivity: 2.5
-
+          // TEMPORARY DIAGNOSTIC: raising sensitivity made trackpad scroll
+          // worse, not better, which means the pixelDelta assumption itself
+          // is wrong for this platform rather than just mistuned. Falling
+          // back to the angleDelta-only formula as a known baseline while
+          // root.debugWheelText below reports the real raw values Qt is
+          // actually delivering on this trackpad, so the next fix is based
+          // on a measurement instead of another guess.
           onWheel: function(event) {
-            var raw = event.pixelDelta.y !== 0
-              ? event.pixelDelta.y * trackpadSensitivity
-              : (event.angleDelta.y / 120) * Style.space(56)
-            if (raw === 0) return
-            root.scrollPanel(-raw)
+            root.debugWheelText = "pixelDelta.y=" + event.pixelDelta.y + "  angleDelta.y=" + event.angleDelta.y
+            if (event.angleDelta.y === 0) return
+            root.scrollPanel(-(event.angleDelta.y / 120) * Style.space(56))
             event.accepted = true
           }
         }
@@ -158,6 +155,17 @@ Panel {
               font.pixelSize: Style.font.caption
             }
           }
+        }
+
+        // TEMPORARY diagnostic readout, remove once trackpad sensitivity
+        // is tuned from real numbers instead of a guess.
+        Text {
+          width: parent.width
+          text: root.debugWheelText
+          color: Color.accent
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+          horizontalAlignment: Text.AlignHCenter
         }
 
         PanelSeparator { width: parent.width }
