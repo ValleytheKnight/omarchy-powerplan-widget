@@ -10,6 +10,8 @@ On laptops, Power Plan also shows lid-close actions, split the same way:
 
 ![Power Plan laptop lid-close actions, split by power state](preview-laptop.png)
 
+![Power Plan panel, scrolled from top to bottom](demo.gif)
+
 Power Plan provides seven controls, each set independently for **Plugged in**
 and **On battery**:
 
