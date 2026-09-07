@@ -1,7 +1,8 @@
 .pragma library
 
-var screensaverPresets = [0, 60, 120, 300, 600, 900, 1800]
-var displayPresets = [0, 60, 120, 300, 600, 900, 1800]
+var quickTimeoutPresets = [0, 60, 120, 300, 600, 900, 1800]
+var screensaverPresets = quickTimeoutPresets
+var displayPresets = quickTimeoutPresets
 var lockPresets = [0, 300, 600, 900, 1800, 3600]
 var sleepPresets = [0, 900, 1800, 3600, 7200]
 var hibernatePresets = [0, 1800, 3600, 7200, 14400, 28800]
