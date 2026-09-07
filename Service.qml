@@ -54,7 +54,7 @@ Item {
   // The screensaver, display-off, and sleep stages are all self-observed here so
   // the cycle can survive the screensaver's brief activity blip (see below). The
   // shared monitor fires at the earliest of the enabled stage boundaries.
-  readonly property bool cycleEnabled: displayEnabled || sleepEnabled
+  readonly property bool cycleEnabled: screensaverSeconds > 0 || displayEnabled || sleepEnabled
   readonly property int firstIdleSeconds: {
     if (!cycleEnabled) return 1
     var candidates = []
