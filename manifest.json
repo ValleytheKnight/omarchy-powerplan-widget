@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "lgse.sandman",
+  "name": "Sandman",
+  "version": "0.9.2",
+  "author": "Pierre Berube",
+  "license": "MIT",
+  "description": "Set lid-close actions and when your screen rests, locks, sleeps, and hibernates.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Sandman",
+    "description": "Set lid actions, screensaver, lock, sleep, and hibernate timers",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
