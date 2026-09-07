@@ -20,16 +20,9 @@ Item {
   property bool displayOff: false
   property bool displayWakePending: false
   property string powerAction: ""
-  property bool monitorRestarting: false
 
   readonly property bool managed: action !== "system"
-  // Non-power lid actions must also block sleep. logind can emit
-  // PrepareForSleep for a lid close before the lid action is blocked, and
-  // Omarchy's sleep monitor responds by locking the session. Blocking sleep for
-  // Do nothing / Display off prevents that false pre-suspend lock while still
-  // allowing Power Plan's Sleep / Hibernate actions to request power transitions.
-  readonly property bool inhibitSleepForLid: action === "nothing" || action === "display"
-  readonly property string inhibitorWhat: inhibitSleepForLid ? "handle-lid-switch:sleep" : "handle-lid-switch"
+  readonly property string inhibitorWhat: "handle-lid-switch"
   readonly property bool hibernateAvailable: hibernateCapability === "yes"
   readonly property bool suspendThenHibernateAvailable: suspendThenHibernateCapability === "yes"
 
@@ -54,9 +47,31 @@ Item {
 
   function handleClosed() {
     if (!root.managed) return
-    if (root.action === "display") turnDisplayOff()
-    else if (root.action === "sleep") requestPowerAction("suspend")
-    else if (root.action === "hibernate") requestPowerAction("hibernate")
+    if (root.action === "display") {
+      turnDisplayOff()
+      guardAgainstSpuriousSleepLock()
+    } else if (root.action === "nothing") {
+      guardAgainstSpuriousSleepLock()
+    } else if (root.action === "sleep") {
+      requestPowerAction("suspend")
+    } else if (root.action === "hibernate") {
+      requestPowerAction("hibernate")
+    }
+  }
+
+  // logind can, in the narrow window right as the lid closes, emit
+  // PrepareForSleep before the standing handle-lid-switch inhibitor has
+  // suppressed its own default lid action, and Omarchy's idle service
+  // responds to that signal by locking the session - a false pre-suspend
+  // lock for a lid action that was never meant to sleep at all. A brief,
+  // self-expiring block on general sleep covers just that race window.
+  // A previous version held that block for as long as this lid action was
+  // selected instead of just this window, which also silently disabled
+  // this plugin's own idle-triggered Sleep feature the whole time a
+  // non-sleep lid action was chosen.
+  function guardAgainstSpuriousSleepLock() {
+    if (sleepGuardProcess.running) return
+    sleepGuardProcess.running = true
   }
 
   function handleOpened() {
@@ -113,20 +128,10 @@ Item {
 
   function ensureMonitorRunning() {
     if (root.managed && root.present) {
-      if (!monitorProcess.running && !root.monitorRestarting) monitorProcess.running = true
+      if (!monitorProcess.running) monitorProcess.running = true
     } else if (monitorProcess.running) {
       monitorProcess.running = false
     }
-  }
-
-  function restartMonitor() {
-    if (!monitorProcess.running) {
-      ensureMonitorRunning()
-      return
-    }
-    root.monitorRestarting = true
-    monitorProcess.running = false
-    monitorRestartTimer.restart()
   }
 
   onActionChanged: {
@@ -135,7 +140,6 @@ Item {
     if (root.stateKnown && root.closed) Qt.callLater(root.handleClosed)
   }
 
-  onInhibitorWhatChanged: restartMonitor()
   onManagedChanged: ensureMonitorRunning()
   onPresentChanged: ensureMonitorRunning()
 
@@ -218,16 +222,6 @@ Item {
   }
 
   Timer {
-    id: monitorRestartTimer
-    interval: 50
-    repeat: false
-    onTriggered: {
-      root.monitorRestarting = false
-      root.ensureMonitorRunning()
-    }
-  }
-
-  Timer {
     interval: 1000
     repeat: true
     running: true
@@ -243,10 +237,16 @@ Item {
       }
     }
     onExited: function(exitCode) {
-      if (!root.monitorRestarting && root.managed && root.present && exitCode !== 0)
+      if (root.managed && root.present && exitCode !== 0)
         root.errorOccurred("Could not monitor laptop lid events")
-      if (!root.monitorRestarting) Qt.callLater(root.ensureMonitorRunning)
+      Qt.callLater(root.ensureMonitorRunning)
     }
+  }
+
+  Process {
+    id: sleepGuardProcess
+    command: ["systemd-inhibit", "--what=sleep", "--mode=block", "--who=Power Plan",
+      "--why=Prevent a spurious pre-suspend lock right at lid close", "sleep", "2"]
   }
 
   Process {
