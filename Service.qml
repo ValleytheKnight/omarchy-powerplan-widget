@@ -81,14 +81,23 @@ Item {
     return true
   }
 
-  function runSetter(command, state, seconds) {
+  // Normalizes and validates a state/seconds pair the same way for every
+  // timeout setter, including setHibernate's own pkexec branch below, which
+  // needs the resolved values before it can do anything else.
+  function validateTimeoutRequest(state, seconds) {
     var powerState = Model.normalizedPowerState(state)
     var value = Model.requestedSeconds(seconds)
     if (value < 0) {
       root.lastError = "Ignored an invalid timeout"
-      return false
+      return null
     }
-    return runHelper([command, powerState, String(value)])
+    return { state: powerState, value: value }
+  }
+
+  function runSetter(command, state, seconds) {
+    var request = validateTimeoutRequest(state, seconds)
+    if (!request) return false
+    return runHelper([command, request.state, String(request.value)])
   }
 
   function setScreensaver(state, seconds) {
@@ -117,12 +126,11 @@ Item {
   // would mean a polkit auth prompt every time the laptop changes power
   // source, which is worse.
   function setHibernate(state, seconds) {
-    var powerState = Model.normalizedPowerState(state)
-    var value = Model.requestedSeconds(seconds)
-    if (value < 0) {
-      root.lastError = "Ignored an invalid timeout"
-      return false
-    }
+    var request = validateTimeoutRequest(state, seconds)
+    if (!request) return false
+    var powerState = request.state
+    var value = request.value
+
     if (value > 0 && !root.suspendThenHibernateAvailable) {
       root.lastError = "Suspend then hibernate is not available on this computer"
       return false
