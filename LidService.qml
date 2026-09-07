@@ -65,10 +65,11 @@ Item {
   // responds to that signal by locking the session - a false pre-suspend
   // lock for a lid action that was never meant to sleep at all. A brief,
   // self-expiring block on general sleep covers just that race window.
-  // A previous version held that block for as long as this lid action was
-  // selected instead of just this window, which also silently disabled
-  // this plugin's own idle-triggered Sleep feature the whole time a
-  // non-sleep lid action was chosen.
+  // Holding that block for as long as this lid action stays selected
+  // instead would also silently disable this plugin's own idle-triggered
+  // Sleep feature the whole time a non-sleep lid action is chosen: a
+  // block-mode inhibitor on "sleep" blocks every suspend request
+  // system-wide, not only ones triggered by the lid.
   function guardAgainstSpuriousSleepLock() {
     if (sleepGuardProcess.running) return
     sleepGuardProcess.running = true
@@ -243,6 +244,10 @@ Item {
     }
   }
 
+  // 2 seconds comfortably covers the gap between a lid-close event reaching
+  // this service and logind's own PrepareForSleep signal; no measurement
+  // pins this exact number, it is a deliberately generous margin rather
+  // than a tuned minimum.
   Process {
     id: sleepGuardProcess
     command: ["systemd-inhibit", "--what=sleep", "--mode=block", "--who=Power Plan",

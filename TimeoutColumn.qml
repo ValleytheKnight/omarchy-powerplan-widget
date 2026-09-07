@@ -32,10 +32,11 @@ Column {
   // The three fields below only push into customHours/customMinutes/
   // customSecondsValue when a SpinBox commits (Enter, Tab, or losing focus),
   // which is standard Qt SpinBox behavior. Reading straight from each
-  // field's live typed text instead means Apply reacts as you type, not
-  // only after a commit - and a disabled Apply button never gets the click
-  // that would have caused a commit, so gating on the committed value alone
-  // could strand the button disabled no matter what you typed.
+  // field's live typed text instead means Apply reacts to typing directly,
+  // not only after a commit - and a disabled Apply button never gets the
+  // click that would have caused a commit, so gating on the committed
+  // value alone could strand the button disabled regardless of what was
+  // typed into the fields.
   function liveFieldSeconds(field) {
     var parsed = field.valueFromText(field.contentItem.text, field.locale)
     return isFinite(parsed) ? parsed : 0
@@ -49,8 +50,8 @@ Column {
     : 0
 
   // Seed only from a real current value. Guessing a default (e.g. 5 minutes)
-  // when the section is currently Off used to leave the fields pre-filled
-  // with a number nobody chose; start blank at 0:0:0 instead.
+  // when the section is currently Off would pre-fill the fields with a
+  // number nobody chose; start blank at 0:0:0 instead.
   function loadCustomTimeout() {
     var parts = root.currentSeconds > 0 ? Model.customParts(root.currentSeconds) : { hours: 0, minutes: 0, seconds: 0 }
     root.customHours = parts.hours
@@ -79,9 +80,9 @@ Column {
     if (root.liveCustomSeconds > 0) root.valueSelected(root.liveCustomSeconds)
   }
 
-  // Mirrors the reset Panel.qml used to do once for all five sections on
-  // open: pick up whichever editor mode (preset vs custom) the current
-  // value actually needs, and seed the custom fields from it.
+  // Runs on every panel open: pick up whichever editor mode (preset vs
+  // custom) the current value actually needs, and seed the custom fields
+  // from it.
   onPanelOpenChanged: {
     if (!root.panelOpen) return
     root.customEditorOpen = !root.usesPreset

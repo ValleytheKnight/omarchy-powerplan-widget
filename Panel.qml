@@ -102,16 +102,14 @@ Panel {
         interactive: contentHeight > height
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-        // No custom wheel handling here. A WheelHandler was tried (this is
-        // Sandman's original approach) and confirmed dead on real hardware:
-        // it received zero events from either a trackpad or an actual mouse
-        // wheel, even with fresh code and a cleared QML cache. No stock
-        // Omarchy panel implements custom wheel scrolling either, which
-        // points at a platform-level limitation in how Quickshell panel
-        // windows deliver wheel input, not a bug in this file. Scrolling
-        // works fine through the ScrollBar drag above and keyboard
-        // navigation (PanelKeyCatcher's onMoveRequested -> scrollPanel)
-        // below, both already confirmed working.
+        // No custom wheel handling here: a WheelHandler receives zero
+        // events from either a trackpad or a mouse wheel in this
+        // environment, even with a cleared QML cache. No stock Omarchy
+        // panel implements custom wheel scrolling either, pointing at a
+        // platform-level limitation in how Quickshell panel windows
+        // deliver wheel input, not a bug in this file. Scrolling works
+        // through the ScrollBar drag above and keyboard navigation
+        // (PanelKeyCatcher's onMoveRequested -> scrollPanel) below.
 
         Column {
           id: content
