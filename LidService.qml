@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Lid handling is intentionally independent from Sandman's idle cycle. For a
+// Lid handling is intentionally independent from Power Plan's idle cycle. For a
 // custom action, this service takes a low-level logind inhibitor and responds to
 // lid state changes itself. Selecting "system" releases the inhibitor and puts
 // logind back in charge.
@@ -27,7 +27,7 @@ Item {
   // PrepareForSleep for a lid close before the lid action is blocked, and
   // Omarchy's sleep monitor responds by locking the session. Blocking sleep for
   // Do nothing / Display off prevents that false pre-suspend lock while still
-  // allowing Sandman's Sleep / Hibernate actions to request power transitions.
+  // allowing Power Plan's Sleep / Hibernate actions to request power transitions.
   readonly property bool inhibitSleepForLid: action === "nothing" || action === "display"
   readonly property string inhibitorWhat: inhibitSleepForLid ? "handle-lid-switch:sleep" : "handle-lid-switch"
   readonly property bool hibernateAvailable: hibernateCapability === "yes"
@@ -236,7 +236,7 @@ Item {
 
   Process {
     id: monitorProcess
-    command: ["systemd-inhibit", "--what=" + root.inhibitorWhat, "--who=Sandman", "--why=Handle the configured lid-close action", "--mode=block", "gdbus", "monitor", "--system", "--dest", "org.freedesktop.login1", "--object-path", "/org/freedesktop/login1"]
+    command: ["systemd-inhibit", "--what=" + root.inhibitorWhat, "--who=Power Plan", "--why=Handle the configured lid-close action", "--mode=block", "gdbus", "monitor", "--system", "--dest", "org.freedesktop.login1", "--object-path", "/org/freedesktop/login1"]
     stdout: SplitParser {
       onRead: function(line) {
         if (String(line).indexOf("LidClosed") >= 0) root.scheduleStateQuery()

@@ -34,6 +34,10 @@ Item {
   readonly property string home: Quickshell.env("HOME")
   readonly property string configPath: home + "/.config/omarchy/powerplan.json"
   readonly property string screensaverClass: "org.omarchy.screensaver"
+  readonly property string powerProfilesStateDir: home + "/.local/state/omarchy/powerprofiles"
+  property var availableProfiles: []
+  property string acProfile: ""
+  property string batteryProfile: ""
   readonly property int screensaverSeconds: Model.effectiveSeconds(configState.screensaver, root.onBattery, 150, true)
   readonly property int displaySeconds: Model.effectiveSeconds(configState.display, root.onBattery, 0, true)
   readonly property int lockSeconds: Model.effectiveSeconds(configState.lock, root.onBattery, 300, true)
@@ -148,6 +152,28 @@ Item {
       return false
     }
     return runHelper(["set-lid", powerState, value])
+  }
+
+  // Power profiles are Omarchy's own feature (powerprofilesctl under the
+  // hood), not something this plugin persists itself. omarchy-powerprofiles-
+  // set already stores the choice under ~/.local/state/omarchy/powerprofiles/
+  // {ac,battery}; this just exposes picking a profile per side instead of
+  // only ever autodetecting.
+  function setPowerProfile(state, profileName) {
+    var powerState = Model.normalizedPowerState(state)
+    var value = String(profileName || "")
+    if (!value || root.availableProfiles.indexOf(value) < 0) {
+      root.lastError = "Ignored an unavailable power profile"
+      return false
+    }
+    if (powerProfileSetProcess.running) return false
+    powerProfileSetProcess.command = ["omarchy-powerprofiles-set", powerState, value]
+    powerProfileSetProcess.running = true
+    return true
+  }
+
+  function refreshPowerProfiles() {
+    powerProfileListProcess.running = true
   }
 
   function refresh() {
@@ -365,6 +391,50 @@ Item {
     onFileChanged: reload()
   }
 
+  Process {
+    id: powerProfileListProcess
+    command: ["omarchy-powerprofiles-list"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        root.availableProfiles = String(text).split("\n")
+          .map(function(line) { return line.trim() })
+          .filter(function(line) { return line.length > 0 })
+      }
+    }
+    Component.onCompleted: running = true
+  }
+
+  Process {
+    id: powerProfileSetProcess
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.lastError = "Could not set the power profile"
+      acProfileFile.reload()
+      batteryProfileFile.reload()
+    }
+  }
+
+  // Plain text, one profile name, written by omarchy-powerprofiles-set. Read
+  // directly rather than round-tripping through that script, since it has no
+  // read-only "get" mode.
+  FileView {
+    id: acProfileFile
+    path: root.powerProfilesStateDir + "/ac"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.acProfile = String(text()).trim()
+    onFileChanged: reload()
+  }
+
+  FileView {
+    id: batteryProfileFile
+    path: root.powerProfilesStateDir + "/battery"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.batteryProfile = String(text()).trim()
+    onFileChanged: reload()
+  }
+
   IdleMonitor {
     id: idleMonitor
     enabled: root.cycleEnabled && !root.idleMonitorRearming
@@ -480,6 +550,9 @@ Item {
         sleepPair: configState.sleep,
         hibernatePair: configState.hibernate,
         lidPair: configState.lid,
+        acProfile: root.acProfile,
+        batteryProfile: root.batteryProfile,
+        availableProfiles: root.availableProfiles,
         lidPresent: root.lidPresent,
         lidClosed: root.lidClosed,
         internalDisplay: root.internalDisplay,
@@ -504,6 +577,7 @@ Item {
     function setSleep(state: string, seconds: int): bool { return root.setSleep(state, seconds) }
     function setHibernate(state: string, seconds: int): bool { return root.setHibernate(state, seconds) }
     function setLid(state: string, action: string): bool { return root.setLid(state, action) }
+    function setPowerProfile(state: string, profileName: string): bool { return root.setPowerProfile(state, profileName) }
     function refresh(): void { root.refresh() }
   }
 }

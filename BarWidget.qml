@@ -5,10 +5,10 @@ import "Model.js" as Model
 
 BarWidget {
   id: root
-  moduleName: "lgse.sandman"
+  moduleName: "valleytheknight.powerplan"
 
-  readonly property var sandmanService: bar && bar.shell
-    ? bar.shell.serviceFor("lgse.sandman") : null
+  readonly property var powerplanService: bar && bar.shell
+    ? bar.shell.serviceFor("valleytheknight.powerplan") : null
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
   readonly property bool popoutSwitchClosing: panelLoader.item
     ? panelLoader.item.popoutSwitchClosing === true : false
@@ -25,14 +25,14 @@ BarWidget {
     panelLoader.item.bar = root.bar
     panelLoader.item.anchorItem = button
     panelLoader.item.hostWidget = root
-    panelLoader.item.sandmanService = root.sandmanService
+    panelLoader.item.powerplanService = root.powerplanService
   }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   onBarChanged: injectPanel()
-  onSandmanServiceChanged: injectPanel()
+  onPowerplanServiceChanged: injectPanel()
 
   Loader {
     id: panelLoader
@@ -50,9 +50,9 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: "󰒲"
-    tooltipText: root.sandmanService
-      ? Model.statusSummary(root.sandmanService.screensaverSeconds, root.sandmanService.displaySeconds, root.sandmanService.lockSeconds, root.sandmanService.sleepSeconds)
-      : "Sandman"
+    tooltipText: root.powerplanService
+      ? Model.statusSummary(root.powerplanService.screensaverSeconds, root.powerplanService.displaySeconds, root.powerplanService.lockSeconds, root.powerplanService.sleepSeconds, root.powerplanService.hibernateSeconds)
+      : "Power Plan"
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
     }

@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "lgse.sandman",
-  "name": "Sandman",
-  "version": "0.9.2",
-  "author": "Pierre Berube",
+  "id": "valleytheknight.powerplan",
+  "name": "Power Plan",
+  "version": "0.1.0",
+  "author": "ValleytheKnight",
   "license": "MIT",
-  "description": "Set lid-close actions and when your screen rests, locks, sleeps, and hibernates.",
+  "description": "Set lid-close actions, screensaver, lock, sleep, hibernate, and power profile, independently for plugged in vs on battery.",
   "kinds": [
     "service",
     "bar-widget"
@@ -16,8 +16,8 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Sandman",
-    "description": "Set lid actions, screensaver, lock, sleep, and hibernate timers",
+    "displayName": "Power Plan",
+    "description": "AC/battery split for screensaver, lock, sleep, hibernate, lid actions, and power profile",
     "category": "System",
     "allowMultiple": false,
     "defaultSection": "right"

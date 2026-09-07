@@ -59,10 +59,10 @@ function normalizedPowerState(value) {
 }
 
 // Every timeout is stored as {ac, battery} rather than one bare value, so AC
-// and battery behavior can differ (the whole point of this plugin over
-// Sandman). A persisted value missing one or both sides falls back to the
-// same default either side would have used alone, so a config written before
-// this shape existed, or a hand-edited partial object, still loads cleanly.
+// and battery behavior can differ. A persisted value missing one or both
+// sides falls back to the same default either side would have used alone,
+// so a config written before this shape existed, or a hand-edited partial
+// object, still loads cleanly.
 function normalizedPair(value, fallback, allowOff) {
   var pair = value || {}
   return {
