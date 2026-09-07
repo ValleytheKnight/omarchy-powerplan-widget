@@ -102,15 +102,20 @@ Panel {
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         WheelHandler {
-          // Scaled by the actual delta instead of a fixed step per event.
-          // 120 is Qt's standard "one notch" unit for a mouse wheel, so this
-          // keeps a single mouse click moving the same 56px as before, while
-          // a trackpad's many small delta events (often single digits) each
-          // move proportionally less, for smooth continuous scroll instead
-          // of the same fixed hop repeated many times per gesture.
+          // A trackpad on Wayland reports real pixel counts via pixelDelta,
+          // not the coarse angleDelta a mouse wheel sends (angleDelta is
+          // often a small synthesized value for touchpad events, which is
+          // why scaling only that felt just as sluggish). Prefer pixelDelta
+          // when the device provides it - a direct 1:1 pixel mapping is
+          // what "smooth scroll" actually means - and fall back to
+          // angleDelta / 120 (Qt's one-notch unit) for a real wheel, which
+          // keeps a single click moving the same 56px as before.
           onWheel: function(event) {
-            if (event.angleDelta.y === 0) return
-            root.scrollPanel(-(event.angleDelta.y / 120) * Style.space(56))
+            var raw = event.pixelDelta.y !== 0
+              ? event.pixelDelta.y
+              : (event.angleDelta.y / 120) * Style.space(56)
+            if (raw === 0) return
+            root.scrollPanel(-raw)
             event.accepted = true
           }
         }
