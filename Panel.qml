@@ -74,7 +74,12 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(480))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    // Capped at half the screen height rather than the full available card
+    // height (KeyboardPanel's default): with seven sections plus two
+    // columns each, the uncapped panel ran the full screen, leaving a
+    // Dropdown's popup with nowhere to open into. The Flickable below
+    // already scrolls whenever content exceeds this height.
+    contentHeight: panel.fittedContentHeight(content.implicitHeight, panel.screenH * 0.5)
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -138,6 +143,63 @@ Panel {
               color: Util.alpha(root.contentForeground, 0.64)
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption
+            }
+          }
+        }
+
+        PanelSeparator { width: parent.width }
+
+        // Placed high in the panel, not at the bottom: the panel already
+        // runs the full height of the screen, so a dropdown's popup opened
+        // near the very bottom has nowhere below it to render into and gets
+        // clipped by the window edge. Dropdown.qml is one of Omarchy's own
+        // shared components (not ours to edit), so the fix is positioning,
+        // not the popup itself.
+        Column {
+          width: parent.width
+          spacing: Style.space(7)
+
+          PanelSectionHeader {
+            width: parent.width
+            text: "POWER PROFILE"
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+          }
+
+          Text {
+            width: parent.width
+            text: "Which performance profile applies for each power source"
+            color: Util.alpha(root.contentForeground, 0.64)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(12)
+
+            Dropdown {
+              width: (parent.width - parent.spacing) / 2
+              label: "Plugged in"
+              value: root.acProfile
+              options: root.profileOptions()
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onChanged: function(value) {
+                if (root.powerplanService) root.powerplanService.setPowerProfile("ac", value)
+              }
+            }
+
+            Dropdown {
+              width: (parent.width - parent.spacing) / 2
+              label: "On battery"
+              value: root.batteryProfile
+              options: root.profileOptions()
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onChanged: function(value) {
+                if (root.powerplanService) root.powerplanService.setPowerProfile("battery", value)
+              }
             }
           }
         }
@@ -334,57 +396,6 @@ Panel {
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
-          }
-        }
-
-        PanelSeparator { width: parent.width }
-
-        Column {
-          width: parent.width
-          spacing: Style.space(7)
-
-          PanelSectionHeader {
-            width: parent.width
-            text: "POWER PROFILE"
-            foreground: root.contentForeground
-            fontFamily: root.contentFontFamily
-          }
-
-          Text {
-            width: parent.width
-            text: "Which performance profile applies for each power source"
-            color: Util.alpha(root.contentForeground, 0.64)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          Row {
-            width: parent.width
-            spacing: Style.space(12)
-
-            Dropdown {
-              width: (parent.width - parent.spacing) / 2
-              label: "Plugged in"
-              value: root.acProfile
-              options: root.profileOptions()
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              onChanged: function(value) {
-                if (root.powerplanService) root.powerplanService.setPowerProfile("ac", value)
-              }
-            }
-
-            Dropdown {
-              width: (parent.width - parent.spacing) / 2
-              label: "On battery"
-              value: root.batteryProfile
-              options: root.profileOptions()
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              onChanged: function(value) {
-                if (root.powerplanService) root.powerplanService.setPowerProfile("battery", value)
-              }
-            }
           }
         }
 
