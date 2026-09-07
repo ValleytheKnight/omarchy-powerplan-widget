@@ -27,12 +27,14 @@ Column {
   property bool customEditorOpen: !root.usesPreset
   property int customHours: 0
   property int customMinutes: 1
-  readonly property int customTimeoutSeconds: Model.customSeconds(root.customHours, root.customMinutes)
+  property int customSecondsValue: 0
+  readonly property int customTimeoutSeconds: Model.customSeconds(root.customHours, root.customMinutes, root.customSecondsValue)
 
   function loadCustomTimeout() {
     var parts = Model.customParts(root.currentSeconds > 0 ? root.currentSeconds : root.defaultCustomSeconds)
     root.customHours = parts.hours
     root.customMinutes = parts.minutes
+    root.customSecondsValue = parts.seconds
   }
 
   function openCustomEditor() {
@@ -114,26 +116,42 @@ Column {
     enabled: !root.saving && root.enabled
     opacity: enabled ? 1 : 0.38
 
-    NumberField {
-      label: "Hours"
-      value: root.customHours
-      from: 0
-      to: 24
-      fieldWidth: parent.width
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-      onModified: function(value) { root.customHours = value }
-    }
+    Row {
+      width: parent.width
+      spacing: Style.space(6)
 
-    NumberField {
-      label: "Minutes"
-      value: root.customMinutes
-      from: 0
-      to: 59
-      fieldWidth: parent.width
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-      onModified: function(value) { root.customMinutes = value }
+      NumberField {
+        label: "Hours"
+        value: root.customHours
+        from: 0
+        to: 24
+        fieldWidth: (parent.width - Style.space(12)) / 3
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onModified: function(value) { root.customHours = value }
+      }
+
+      NumberField {
+        label: "Minutes"
+        value: root.customMinutes
+        from: 0
+        to: 59
+        fieldWidth: (parent.width - Style.space(12)) / 3
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onModified: function(value) { root.customMinutes = value }
+      }
+
+      NumberField {
+        label: "Seconds"
+        value: root.customSecondsValue
+        from: 0
+        to: 59
+        fieldWidth: (parent.width - Style.space(12)) / 3
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onModified: function(value) { root.customSecondsValue = value }
+      }
     }
 
     Button {

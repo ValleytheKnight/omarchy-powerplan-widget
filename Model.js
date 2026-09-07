@@ -133,17 +133,19 @@ function isPreset(value, presets) {
 }
 
 function customParts(seconds) {
-  var totalMinutes = Math.max(1, Math.round(Number(seconds) / 60))
+  var total = Math.max(1, Math.round(Number(seconds)))
   return {
-    hours: Math.floor(totalMinutes / 60),
-    minutes: totalMinutes % 60
+    hours: Math.floor(total / 3600),
+    minutes: Math.floor((total % 3600) / 60),
+    seconds: total % 60
   }
 }
 
-function customSeconds(hours, minutes) {
+function customSeconds(hours, minutes, seconds) {
   var safeHours = Math.max(0, Math.min(24, Math.round(Number(hours) || 0)))
   var safeMinutes = Math.max(0, Math.min(59, Math.round(Number(minutes) || 0)))
-  return (safeHours * 60 + safeMinutes) * 60
+  var safeSeconds = Math.max(0, Math.min(59, Math.round(Number(seconds) || 0)))
+  return safeHours * 3600 + safeMinutes * 60 + safeSeconds
 }
 
 // Summarizes the values actually in effect right now (already resolved by
