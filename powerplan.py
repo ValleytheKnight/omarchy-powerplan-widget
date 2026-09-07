@@ -341,47 +341,26 @@ def apply_effective(screensaver: int, lock: int, lid: str) -> dict[str, Any]:
     return {"screensaver": screensaver, "lock": lock, "lid": lid}
 
 
-def set_screensaver(state: str, value: int) -> dict[str, Any]:
+# One (key, default) pair per `set-*` timeout command. The five setters used
+# to be near-identical copies differing only in these two values; a bad
+# fallback here matters more than it looks - with allow_off, falling back to
+# the wrong constant (e.g. DEFAULT_SLEEP for a malformed screensaver value)
+# would turn an unusable input into an unintended "Off" and silently stand
+# that feature down. Only an explicit 0 from the caller ever means Off.
+TIMEOUT_FIELDS: dict[str, tuple[str, int]] = {
+    "set-screensaver": ("screensaver", DEFAULT_SCREENSAVER),
+    "set-lock": ("lock", DEFAULT_LOCK),
+    "set-display": ("display", DEFAULT_DISPLAY),
+    "set-sleep": ("sleep", DEFAULT_SLEEP),
+    "set-hibernate": ("hibernate", DEFAULT_HIBERNATE),
+}
+
+
+def set_timeout_field(command: str, state: str, value: int) -> dict[str, Any]:
+    key, default = TIMEOUT_FIELDS[command]
     st = power_state(state)
     config = current_config()
-    # Fall back to the default, never to DEFAULT_SLEEP: with allow_off a 0
-    # fallback would turn an unusable value into "Off" and silently stand the
-    # screen saver down. Only an explicit 0 from the caller means Off.
-    config["screensaver"][st] = seconds(value, DEFAULT_SCREENSAVER, allow_off=True)
-    atomic_write(config_path(), config)
-    return config
-
-
-def set_lock(state: str, value: int) -> dict[str, Any]:
-    st = power_state(state)
-    config = current_config()
-    # Same reasoning as set_screensaver, and it matters more here: a 0
-    # fallback would disable auto-lock on malformed input.
-    config["lock"][st] = seconds(value, DEFAULT_LOCK, allow_off=True)
-    atomic_write(config_path(), config)
-    return config
-
-
-def set_display(state: str, value: int) -> dict[str, Any]:
-    st = power_state(state)
-    config = current_config()
-    config["display"][st] = seconds(value, DEFAULT_DISPLAY, allow_off=True)
-    atomic_write(config_path(), config)
-    return config
-
-
-def set_sleep(state: str, value: int) -> dict[str, Any]:
-    st = power_state(state)
-    config = current_config()
-    config["sleep"][st] = seconds(value, DEFAULT_SLEEP, allow_off=True)
-    atomic_write(config_path(), config)
-    return config
-
-
-def set_hibernate(state: str, value: int) -> dict[str, Any]:
-    st = power_state(state)
-    config = current_config()
-    config["hibernate"][st] = seconds(value, DEFAULT_HIBERNATE, allow_off=True)
+    config[key][st] = seconds(value, default, allow_off=True)
     atomic_write(config_path(), config)
     return config
 
@@ -534,16 +513,10 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("get")
     commands.add_parser("diagnose-hibernate")
 
-    def add_state_timeout(name: str) -> None:
+    for name in TIMEOUT_FIELDS:
         sub = commands.add_parser(name)
         sub.add_argument("state", choices=POWER_STATES)
         sub.add_argument("seconds", type=timeout)
-
-    add_state_timeout("set-screensaver")
-    add_state_timeout("set-display")
-    add_state_timeout("set-lock")
-    add_state_timeout("set-sleep")
-    add_state_timeout("set-hibernate")
 
     configure_hibernate_parser = commands.add_parser("configure-hibernate")
     configure_hibernate_parser.add_argument("seconds", type=timeout)
@@ -569,16 +542,8 @@ def main() -> int:
             config = current_config()
         elif args.command == "diagnose-hibernate":
             config = hibernate_diagnostics()
-        elif args.command == "set-screensaver":
-            config = set_screensaver(args.state, args.seconds)
-        elif args.command == "set-display":
-            config = set_display(args.state, args.seconds)
-        elif args.command == "set-lock":
-            config = set_lock(args.state, args.seconds)
-        elif args.command == "set-sleep":
-            config = set_sleep(args.state, args.seconds)
-        elif args.command == "set-hibernate":
-            config = set_hibernate(args.state, args.seconds)
+        elif args.command in TIMEOUT_FIELDS:
+            config = set_timeout_field(args.command, args.state, args.seconds)
         elif args.command == "configure-hibernate":
             configure_hibernate(args.seconds)
             config = {"hibernate": args.seconds}
