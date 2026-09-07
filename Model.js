@@ -6,6 +6,7 @@ var lockPresets = [0, 300, 600, 900, 1800, 3600]
 var sleepPresets = [0, 900, 1800, 3600, 7200]
 var hibernatePresets = [0, 1800, 3600, 7200, 14400, 28800]
 var lidActions = ["system", "nothing", "display", "sleep", "hibernate"]
+var powerStates = ["ac", "battery"]
 
 var maxTimeoutSeconds = 7 * 24 * 60 * 60
 
@@ -52,18 +53,58 @@ function lidActionLabel(action) {
   }
 }
 
+function normalizedPowerState(value) {
+  var state = String(value || "ac")
+  return powerStates.indexOf(state) >= 0 ? state : "ac"
+}
+
+// Every timeout is stored as {ac, battery} rather than one bare value, so AC
+// and battery behavior can differ (the whole point of this plugin over
+// Sandman). A persisted value missing one or both sides falls back to the
+// same default either side would have used alone, so a config written before
+// this shape existed, or a hand-edited partial object, still loads cleanly.
+function normalizedPair(value, fallback, allowOff) {
+  var pair = value || {}
+  return {
+    ac: normalizedSeconds(pair.ac, fallback, allowOff),
+    battery: normalizedSeconds(pair.battery, fallback, allowOff)
+  }
+}
+
+function normalizedLidPair(value) {
+  var pair = value || {}
+  return {
+    ac: normalizedLidAction(pair.ac),
+    battery: normalizedLidAction(pair.battery)
+  }
+}
+
+// Resolve a stored pair down to the one value that applies right now. This is
+// the function Service.qml calls every time UPower reports a power-source
+// change, and on every timer rearm in between.
+function effectiveSeconds(pair, onBattery, fallback, allowOff) {
+  if (!pair) return fallback
+  var value = onBattery ? pair.battery : pair.ac
+  return normalizedSeconds(value, fallback, allowOff)
+}
+
+function effectiveLidAction(pair, onBattery) {
+  if (!pair) return "system"
+  return normalizedLidAction(onBattery ? pair.battery : pair.ac)
+}
+
 function parseConfig(raw) {
   var parsed = {}
   try { parsed = JSON.parse(String(raw || "{}")) }
   catch (error) { parsed = {} }
 
   return {
-    screensaver: normalizedSeconds(parsed.screensaver, 150, true),
-    display: normalizedSeconds(parsed.display, 0, true),
-    lock: normalizedSeconds(parsed.lock, 300, true),
-    sleep: normalizedSeconds(parsed.sleep, 0, true),
-    hibernate: normalizedSeconds(parsed.hibernate, 0, true),
-    lid: normalizedLidAction(parsed.lid)
+    screensaver: normalizedPair(parsed.screensaver, 150, true),
+    display: normalizedPair(parsed.display, 0, true),
+    lock: normalizedPair(parsed.lock, 300, true),
+    sleep: normalizedPair(parsed.sleep, 0, true),
+    hibernate: normalizedPair(parsed.hibernate, 0, true),
+    lid: normalizedLidPair(parsed.lid)
   }
 }
 
@@ -105,6 +146,9 @@ function customSeconds(hours, minutes) {
   return (safeHours * 60 + safeMinutes) * 60
 }
 
+// Summarizes the values actually in effect right now (already resolved by
+// the caller via effectiveSeconds/effectiveLidAction), not both sides of
+// every pair - that's what's on screen in the bar widget tooltip.
 function statusSummary(screensaver, display, lock, sleep, hibernate) {
   var summary = "Screen " + formatDuration(screensaver)
     + " · Displays " + formatDuration(display)

@@ -3,18 +3,28 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Services.UPower
 import "Model.js" as Model
 
 Item {
   id: root
-
+  
   property var shell: null
-  property var configState: ({ screensaver: 150, display: 0, lock: 300, sleep: 0, hibernate: 0, lid: "system" })
+  property var configState: ({
+  screensaver: { ac: 150, battery: 150 },
+  display: { ac: 0, battery: 0 },
+  lock: { ac: 300, battery: 300 },
+  sleep: { ac: 0, battery: 0 },
+  hibernate: { ac: 0, battery: 0 },
+  lid: { ac: "system", battery: "system" }
+  })
+  readonly property bool onBattery: UPower.onBattery
   property bool saving: false
   property string lastError: ""
   property string hibernateDiagnostic: ""
   property bool suspendPending: false
   property int pendingHibernateSeconds: 0
+  property string pendingHibernateState: "ac"
   property bool displaysOff: false
   property bool idleCycleRunning: false
   property bool idleMonitorRearming: false
@@ -22,14 +32,14 @@ Item {
   property int screensaverWindowCount: 0
 
   readonly property string home: Quickshell.env("HOME")
-  readonly property string configPath: home + "/.config/omarchy/sandman.json"
+  readonly property string configPath: home + "/.config/omarchy/powerplan.json"
   readonly property string screensaverClass: "org.omarchy.screensaver"
-  readonly property int screensaverSeconds: Model.normalizedSeconds(configState.screensaver, 150, true)
-  readonly property int displaySeconds: Model.normalizedSeconds(configState.display, 0, true)
-  readonly property int lockSeconds: Model.normalizedSeconds(configState.lock, 300, true)
-  readonly property int sleepSeconds: Model.normalizedSeconds(configState.sleep, 0, true)
-  readonly property int hibernateSeconds: Model.normalizedSeconds(configState.hibernate, 0, true)
-  readonly property string lidAction: Model.normalizedLidAction(configState.lid)
+  readonly property int screensaverSeconds: Model.effectiveSeconds(configState.screensaver, root.onBattery, 150, true)
+  readonly property int displaySeconds: Model.effectiveSeconds(configState.display, root.onBattery, 0, true)
+  readonly property int lockSeconds: Model.effectiveSeconds(configState.lock, root.onBattery, 300, true)
+  readonly property int sleepSeconds: Model.effectiveSeconds(configState.sleep, root.onBattery, 0, true)
+  readonly property int hibernateSeconds: Model.effectiveSeconds(configState.hibernate, root.onBattery, 0, true)
+  readonly property string lidAction: Model.effectiveLidAction(configState.lid, root.onBattery)
   readonly property bool lidPresent: lidService.present
   readonly property bool lidClosed: lidService.closed
   readonly property string internalDisplay: lidService.internalDisplay
@@ -52,11 +62,11 @@ Item {
   readonly property int displayDelaySeconds: displayEnabled ? Math.max(0, displaySeconds - firstIdleSeconds) : 0
   readonly property int sleepDelaySeconds: sleepEnabled ? Math.max(0, sleepSeconds - firstIdleSeconds) : 0
   readonly property string helperPath: {
-    var url = String(Qt.resolvedUrl("sandman.py"))
+    var url = String(Qt.resolvedUrl("powerplan.py"))
     return decodeURIComponent(url.indexOf("file://") === 0 ? url.substring(7) : url)
   }
   // This helper is installed root-owned; never execute plugin code through pkexec.
-  readonly property string hibernateHelperPath: "/usr/local/libexec/sandman-configure-hibernate"
+  readonly property string hibernateHelperPath: "/usr/local/libexec/powerplan-configure-hibernate"
 
   function runHelper(arguments) {
     if (settingsProcess.running || hibernateConfigProcess.running) return false
@@ -67,32 +77,43 @@ Item {
     return true
   }
 
-  function runSetter(command, seconds) {
+  function runSetter(command, state, seconds) {
+    var powerState = Model.normalizedPowerState(state)
     var value = Model.requestedSeconds(seconds)
     if (value < 0) {
       root.lastError = "Ignored an invalid timeout"
       return false
     }
-    return runHelper([command, String(value)])
+    return runHelper([command, powerState, String(value)])
   }
 
-  function setScreensaver(seconds) {
-    return runSetter("set-screensaver", seconds)
+  function setScreensaver(state, seconds) {
+    return runSetter("set-screensaver", state, seconds)
   }
 
-  function setLock(seconds) {
-    return runSetter("set-lock", seconds)
+  function setLock(state, seconds) {
+    return runSetter("set-lock", state, seconds)
   }
 
-  function setDisplay(seconds) {
-    return runSetter("set-display", seconds)
+  function setDisplay(state, seconds) {
+    return runSetter("set-display", state, seconds)
   }
 
-  function setSleep(seconds) {
-    return runSetter("set-sleep", seconds)
+  function setSleep(state, seconds) {
+    return runSetter("set-sleep", state, seconds)
   }
 
-  function setHibernate(seconds) {
+  // Hibernate delay is one systemd-wide knob (HibernateDelaySec), not a
+  // per-app setting like DPMS or a lock command, so only one side of the
+  // {ac, battery} pair can be the "real" configured value at any moment.
+  // Editing the side that matches root.onBattery right now reconfigures it
+  // immediately via the privileged helper. Editing the other (inactive)
+  // side just saves the number; it takes effect the next time that side is
+  // edited while active. Reconfiguring on every AC plug/unplug instead
+  // would mean a polkit auth prompt every time the laptop changes power
+  // source, which is worse.
+  function setHibernate(state, seconds) {
+    var powerState = Model.normalizedPowerState(state)
     var value = Model.requestedSeconds(seconds)
     if (value < 0) {
       root.lastError = "Ignored an invalid timeout"
@@ -103,8 +124,15 @@ Item {
       return false
     }
     if (hibernateConfigProcess.running || settingsProcess.running) return false
+
+    var isActiveSide = (powerState === "battery") === root.onBattery
+    if (!isActiveSide) {
+      return runHelper(["set-hibernate", powerState, String(value)])
+    }
+
     root.saving = true
     root.lastError = ""
+    root.pendingHibernateState = powerState
     root.pendingHibernateSeconds = value
     hibernateConfigProcess.command = ["pkexec", root.hibernateHelperPath,
       "configure-hibernate", String(value)]
@@ -112,13 +140,14 @@ Item {
     return true
   }
 
-  function setLid(action) {
+  function setLid(state, action) {
+    var powerState = Model.normalizedPowerState(state)
     var value = String(action)
     if (Model.lidActions.indexOf(value) < 0) {
       root.lastError = "Ignored an invalid lid action"
       return false
     }
-    return runHelper(["set-lid", value])
+    return runHelper(["set-lid", powerState, value])
   }
 
   function refresh() {
@@ -273,7 +302,7 @@ Item {
     }
     Component.onCompleted: running = true
     onExited: function(exitCode) {
-      if (exitCode !== 0) root.lastError = "Could not initialize Sandman settings"
+      if (exitCode !== 0) root.lastError = "Could not initialize Power Plan settings"
       configFile.reload()
     }
   }
@@ -282,7 +311,7 @@ Item {
     id: hibernateConfigProcess
     onExited: function(exitCode) {
       if (exitCode === 0) {
-        root.runHelper(["set-hibernate", String(root.pendingHibernateSeconds)])
+        root.runHelper(["set-hibernate", root.pendingHibernateState, String(root.pendingHibernateSeconds)])
       } else {
         root.saving = false
         root.lastError = "Could not change the system hibernate delay"
@@ -357,6 +386,19 @@ Item {
     function onRawEvent(event) { root.handleHyprlandEvent(event) }
   }
 
+  // UPower.onBattery drives every effectiveSeconds()/effectiveLidAction()
+  // binding above automatically (they're plain QML property bindings), so
+  // the values themselves update the instant the signal fires. What does
+  // NOT rebind on its own is the running idle cycle: IdleMonitor keeps its
+  // already-armed timeout, and Timer intervals don't retroactively rewind a
+  // timer that's mid-countdown. Rearm on every power-source flip so the new
+  // side's timers take effect immediately instead of after the current
+  // cycle happens to finish.
+  Connections {
+    target: UPower
+    function onOnBatteryChanged() { root.rearmIdleMonitor() }
+  }
+
   // Hyprland's Lua config parses `hyprctl dispatch` args as Lua, so the classic
   // `dpms off` form is a syntax error there; use the `hl.dsp` shorthand and fall
   // back to the classic form for older Hyprland, mirroring omarchy-launch-screensaver.
@@ -394,16 +436,23 @@ Item {
   }
 
   IpcHandler {
-    target: "lgse.sandman"
+    target: "valleytheknight.powerplan"
 
     function status(): string {
       return JSON.stringify({
+        onBattery: root.onBattery,
         screensaver: root.screensaverSeconds,
         display: root.displaySeconds,
         lock: root.lockSeconds,
         sleep: root.sleepSeconds,
         hibernate: root.hibernateSeconds,
         lid: root.lidAction,
+        screensaverPair: configState.screensaver,
+        displayPair: configState.display,
+        lockPair: configState.lock,
+        sleepPair: configState.sleep,
+        hibernatePair: configState.hibernate,
+        lidPair: configState.lid,
         lidPresent: root.lidPresent,
         lidClosed: root.lidClosed,
         internalDisplay: root.internalDisplay,
@@ -422,12 +471,12 @@ Item {
       })
     }
 
-    function setScreensaver(seconds: int): bool { return root.setScreensaver(seconds) }
-    function setDisplay(seconds: int): bool { return root.setDisplay(seconds) }
-    function setLock(seconds: int): bool { return root.setLock(seconds) }
-    function setSleep(seconds: int): bool { return root.setSleep(seconds) }
-    function setHibernate(seconds: int): bool { return root.setHibernate(seconds) }
-    function setLid(action: string): bool { return root.setLid(action) }
+    function setScreensaver(state: string, seconds: int): bool { return root.setScreensaver(state, seconds) }
+    function setDisplay(state: string, seconds: int): bool { return root.setDisplay(state, seconds) }
+    function setLock(state: string, seconds: int): bool { return root.setLock(state, seconds) }
+    function setSleep(state: string, seconds: int): bool { return root.setSleep(state, seconds) }
+    function setHibernate(state: string, seconds: int): bool { return root.setHibernate(state, seconds) }
+    function setLid(state: string, action: string): bool { return root.setLid(state, action) }
     function refresh(): void { root.refresh() }
   }
 }
