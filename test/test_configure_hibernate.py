@@ -9,13 +9,13 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-HELPER_PATH = ROOT / "sandman-configure-hibernate"
+HELPER_PATH = ROOT / "powerplan-configure-hibernate"
 
 
 def load_helper():
     """Import the privileged helper, which has no .py extension."""
     loader = importlib.machinery.SourceFileLoader(
-        "sandman_configure_hibernate", str(HELPER_PATH)
+        "powerplan_configure_hibernate", str(HELPER_PATH)
     )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -53,10 +53,10 @@ class ConfigureHibernateMainTest(unittest.TestCase):
         self.helper = load_helper()
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.config = Path(temporary.name) / "sleep.conf.d" / "90-sandman.conf"
+        self.config = Path(temporary.name) / "sleep.conf.d" / "90-powerplan.conf"
 
     def run_main(self, *arguments, euid=0):
-        argv = ["sandman-configure-hibernate", *arguments]
+        argv = ["powerplan-configure-hibernate", *arguments]
         with mock.patch.object(self.helper, "CONFIG", self.config), \
                 mock.patch("os.geteuid", return_value=euid), \
                 mock.patch.object(sys, "argv", argv):

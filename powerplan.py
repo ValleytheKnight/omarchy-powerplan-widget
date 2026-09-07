@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Persist Sandman settings without discarding unrelated Omarchy config."""
+"""Persist Power Plan settings without discarding unrelated Omarchy config."""
 
 from __future__ import annotations
 
@@ -21,20 +21,22 @@ DEFAULT_SLEEP = 0
 DEFAULT_HIBERNATE = 0
 DEFAULT_LID_ACTION = "system"
 LID_ACTIONS = ("system", "nothing", "display", "sleep", "hibernate")
+POWER_STATES = ("ac", "battery")
 OFF_TIMEOUT = 7 * 24 * 60 * 60
 MAX_TIMEOUT = OFF_TIMEOUT
-HYPR_OVERRIDE_BEGIN = "-- BEGIN Sandman lid action override"
-HYPR_OVERRIDE_END = "-- END Sandman lid action override"
+HYPR_OVERRIDE_BEGIN = "-- BEGIN Power Plan lid action override"
+HYPR_OVERRIDE_END = "-- END Power Plan lid action override"
 HYPR_OVERRIDE_BLOCK = f"""{HYPR_OVERRIDE_BEGIN}
--- Sandman manages laptop lid-close actions. Omarchy's default lid-close
--- binding locks immediately on lid close, before Sandman can apply Do nothing
--- or Display off, so replace it with monitor/clamshell reconciliation only.
+-- Power Plan manages laptop lid-close actions. Omarchy's default lid-close
+-- binding locks immediately on lid close, before Power Plan can apply Do
+-- nothing or Display off, so replace it with monitor/clamshell
+-- reconciliation only.
 hl.unbind("switch:on:Lid Switch")
 o.bind("switch:on:Lid Switch", nil, "omarchy-hyprland-monitor-clamshell", {{ locked = true }})
 {HYPR_OVERRIDE_END}
 """
 MANAGED_LID_ACTIONS = {"nothing", "display", "sleep", "hibernate"}
-SYSTEMD_SLEEP_CONFIG = Path("/etc/systemd/sleep.conf.d/90-sandman.conf")
+SYSTEMD_SLEEP_CONFIG = Path("/etc/systemd/sleep.conf.d/90-powerplan.conf")
 
 
 class ConfigError(Exception):
@@ -47,17 +49,18 @@ def shell_path() -> Path:
 
 
 def config_path() -> Path:
-    override = os.environ.get("SANDMAN_CONFIG_PATH")
-    return Path(override).expanduser() if override else Path.home() / ".config/omarchy/sandman.json"
+    override = os.environ.get("POWERPLAN_CONFIG_PATH")
+    return Path(override).expanduser() if override else Path.home() / ".config/omarchy/powerplan.json"
 
 
 def hypr_bindings_path() -> Path:
-    override = os.environ.get("SANDMAN_HYPR_BINDINGS_PATH")
+    override = os.environ.get("POWERPLAN_HYPR_BINDINGS_PATH")
     return Path(override).expanduser() if override else Path.home() / ".config/hypr/bindings.lua"
 
 
 def systemd_sleep_config_path() -> Path:
-    return SYSTEMD_SLEEP_CONFIG
+    override = os.environ.get("POWERPLAN_SYSTEMD_SLEEP_CONFIG_PATH")
+    return Path(override) if override else SYSTEMD_SLEEP_CONFIG
 
 
 def diagnostic_path(environment_name: str, default: str) -> Path:
@@ -117,10 +120,15 @@ def seconds(value: Any, fallback: int, *, allow_off: bool = False) -> int:
         return 0
     if result <= 0:
         return fallback
-    # Bound persisted values too, not just setter input. A sandman.json written
-    # by an older version - or edited by hand - can hold a value large enough to
-    # overflow sleepDelaySeconds * 1000 in the QML timer.
+    # Bound persisted values too, not just setter input. A powerplan.json
+    # written by an older version - or edited by hand - can hold a value
+    # large enough to overflow sleepDelaySeconds * 1000 in the QML timer.
     return min(result, MAX_TIMEOUT)
+
+
+def power_state(value: Any) -> str:
+    result = str(value or "ac")
+    return result if result in POWER_STATES else "ac"
 
 
 def atomic_write_text(path: Path, text: str) -> None:
@@ -148,6 +156,25 @@ def lid_action(value: Any) -> str:
     return value if isinstance(value, str) and value in LID_ACTIONS else DEFAULT_LID_ACTION
 
 
+def pair(value: Any, default: int, *, allow_off: bool = True) -> dict[str, int]:
+    """Normalize a persisted {ac, battery} timeout pair.
+
+    A missing or malformed side falls back to `default`, same rule
+    normalizedSeconds/effectiveSeconds apply in Model.js, so a config
+    written by hand, or missing one side entirely, still loads cleanly.
+    """
+    raw = value if isinstance(value, dict) else {}
+    return {
+        "ac": seconds(raw.get("ac"), default, allow_off=allow_off),
+        "battery": seconds(raw.get("battery"), default, allow_off=allow_off),
+    }
+
+
+def lid_pair(value: Any) -> dict[str, str]:
+    raw = value if isinstance(value, dict) else {}
+    return {"ac": lid_action(raw.get("ac")), "battery": lid_action(raw.get("battery"))}
+
+
 def remove_hypr_override(text: str) -> str:
     pattern = re.compile(
         rf"\n?{re.escape(HYPR_OVERRIDE_BEGIN)}.*?{re.escape(HYPR_OVERRIDE_END)}\n?",
@@ -157,8 +184,13 @@ def remove_hypr_override(text: str) -> str:
 
 
 def sync_hypr_lid_override(action: str) -> None:
-    """Install/remove the Hyprland lid binding override for managed actions."""
-    if os.environ.get("SANDMAN_DISABLE_HYPR_SYNC"):
+    """Install/remove the Hyprland lid binding override for managed actions.
+
+    `action` is the effective action for whichever power state applies right
+    now (QML resolves this; see apply_effective), not a stored pair - only
+    one side can be "in force" for a static Hyprland keybind at any moment.
+    """
+    if os.environ.get("POWERPLAN_DISABLE_HYPR_SYNC"):
         return
 
     path = hypr_bindings_path()
@@ -183,7 +215,7 @@ def sync_hypr_lid_override(action: str) -> None:
     except OSError:
         return
 
-    if os.environ.get("SANDMAN_SKIP_HYPR_RELOAD") or os.environ.get("SANDMAN_HYPR_BINDINGS_PATH"):
+    if os.environ.get("POWERPLAN_SKIP_HYPR_RELOAD") or os.environ.get("POWERPLAN_HYPR_BINDINGS_PATH"):
         return
     try:
         subprocess.run(["hyprctl", "reload"], check=False, capture_output=True, timeout=2)
@@ -191,55 +223,51 @@ def sync_hypr_lid_override(action: str) -> None:
         pass
 
 
-def current_config() -> dict[str, int | str]:
+def current_config() -> dict[str, dict[str, int] | dict[str, str]]:
     # shell.json belongs to Omarchy and holds unrelated settings, so it is read
-    # strictly. sandman.json is ours and fully derivable, so a damaged copy may
-    # be rebuilt from defaults.
+    # strictly. powerplan.json is ours and fully derivable, so a damaged copy
+    # may be rebuilt from defaults.
     shell = read_json(shell_path(), {}, strict=True)
     idle = shell.get("idle") if isinstance(shell.get("idle"), dict) else {}
     stored = read_json(config_path(), {})
     shell_screensaver = seconds(idle.get("screensaver"), DEFAULT_SCREENSAVER)
     shell_lock = seconds(idle.get("lock"), DEFAULT_LOCK)
-    stored_screensaver = (
-        seconds(stored.get("screensaver"), DEFAULT_SCREENSAVER, allow_off=True)
-        if "screensaver" in stored
-        else shell_screensaver
-    )
-    stored_lock = (
-        seconds(stored.get("lock"), DEFAULT_LOCK, allow_off=True)
-        if "lock" in stored
-        else shell_lock
-    )
+
+    # A fresh install (no stored screensaver/lock pair yet) seeds both the ac
+    # and battery sides from whatever Omarchy's native idle service already
+    # has configured, the same continuity a single-value config gave a
+    # first-time install. Once a pair exists on disk it is authoritative and
+    # shell.json is no longer consulted for these two keys.
+    screensaver_default = DEFAULT_SCREENSAVER if "screensaver" in stored else shell_screensaver
+    lock_default = DEFAULT_LOCK if "lock" in stored else shell_lock
+
     return {
-        "screensaver": stored_screensaver,
-        "display": seconds(stored.get("display"), DEFAULT_DISPLAY, allow_off=True),
-        "lock": stored_lock,
-        "sleep": seconds(stored.get("sleep"), DEFAULT_SLEEP, allow_off=True),
-        "hibernate": seconds(stored.get("hibernate"), DEFAULT_HIBERNATE, allow_off=True),
-        "lid": lid_action(stored.get("lid")),
+        "screensaver": pair(stored.get("screensaver"), screensaver_default),
+        "display": pair(stored.get("display"), DEFAULT_DISPLAY),
+        "lock": pair(stored.get("lock"), lock_default),
+        "sleep": pair(stored.get("sleep"), DEFAULT_SLEEP),
+        "hibernate": pair(stored.get("hibernate"), DEFAULT_HIBERNATE),
+        "lid": lid_pair(stored.get("lid")),
     }
 
 
-def initialize() -> dict[str, int | str]:
+def initialize() -> dict[str, Any]:
     config = current_config()
     # Always persist the normalized shape so existing installs gain new fields.
     atomic_write(config_path(), config)
-    sync_hypr_lid_override(str(config["lid"]))
     return config
 
 
-def effective_idle_timeouts(config: dict[str, int | str]) -> tuple[int, int]:
-    lock = int(config["lock"])
-    screensaver = int(config["screensaver"])
+def effective_idle_timeouts(screensaver: int, lock: int) -> tuple[int, int]:
     lock_timeout = lock if lock > 0 else OFF_TIMEOUT
     screensaver_timeout = screensaver if screensaver > 0 else lock_timeout + 1
     return screensaver_timeout, lock_timeout
 
 
-def apply_idle_config(config: dict[str, int | str]) -> None:
+def apply_idle_config(screensaver: int, lock: int) -> None:
     shell = read_json(shell_path(), {"version": 1}, strict=True)
     idle = shell.get("idle") if isinstance(shell.get("idle"), dict) else {}
-    screensaver_timeout, lock_timeout = effective_idle_timeouts(config)
+    screensaver_timeout, lock_timeout = effective_idle_timeouts(screensaver, lock)
     shell["idle"] = {
         **idle,
         "screensaver": screensaver_timeout,
@@ -248,7 +276,7 @@ def apply_idle_config(config: dict[str, int | str]) -> None:
     atomic_write(shell_path(), shell)
 
 
-def rearm_native_idle(config: dict[str, int | str]) -> None:
+def rearm_native_idle(screensaver: int, lock: int) -> None:
     """Re-register Omarchy's IdleMonitor after changing its timeout.
 
     Quickshell currently leaves the old idle notification registered when only
@@ -258,7 +286,7 @@ def rearm_native_idle(config: dict[str, int | str]) -> None:
     if os.environ.get("OMARCHY_SHELL_CONFIG_PATH"):
         return
 
-    screensaver_timeout, lock_timeout = effective_idle_timeouts(config)
+    screensaver_timeout, lock_timeout = effective_idle_timeouts(screensaver, lock)
     for _ in range(20):
         try:
             completed = subprocess.run(
@@ -297,49 +325,63 @@ def rearm_native_idle(config: dict[str, int | str]) -> None:
         time.sleep(0.05)
 
 
-def set_screensaver(value: int) -> dict[str, int | str]:
+def apply_effective(screensaver: int, lock: int, lid: str) -> dict[str, Any]:
+    """Sync system-wide state to whichever values are effective right now.
+
+    QML is the one thing that reliably knows the current AC/battery state
+    moment-to-moment (Quickshell.Services.UPower), so it resolves the
+    {ac, battery} pairs down to one value each and calls this instead of
+    Python re-deriving the power state itself and racing that signal.
+    Called after any setting change, and again on every power-source flip
+    even when nothing was stored, since the effective value still changed.
+    """
+    apply_idle_config(screensaver, lock)
+    rearm_native_idle(screensaver, lock)
+    sync_hypr_lid_override(lid)
+    return {"screensaver": screensaver, "lock": lock, "lid": lid}
+
+
+def set_screensaver(state: str, value: int) -> dict[str, Any]:
+    st = power_state(state)
     config = current_config()
     # Fall back to the default, never to DEFAULT_SLEEP: with allow_off a 0
     # fallback would turn an unusable value into "Off" and silently stand the
     # screen saver down. Only an explicit 0 from the caller means Off.
-    config["screensaver"] = seconds(value, DEFAULT_SCREENSAVER, allow_off=True)
-    apply_idle_config(config)
-    atomic_write(config_path(), config)
-    rearm_native_idle(config)
-    return config
-
-
-def set_lock(value: int) -> dict[str, int | str]:
-    config = current_config()
-    # Same reasoning as set_screensaver, and it matters more here: a 0 fallback
-    # would disable auto-lock on malformed input.
-    config["lock"] = seconds(value, DEFAULT_LOCK, allow_off=True)
-    apply_idle_config(config)
-    atomic_write(config_path(), config)
-    rearm_native_idle(config)
-    return config
-
-
-def set_display(value: int) -> dict[str, int | str]:
-    value = seconds(value, DEFAULT_DISPLAY, allow_off=True)
-    config = current_config()
-    config["display"] = value
+    config["screensaver"][st] = seconds(value, DEFAULT_SCREENSAVER, allow_off=True)
     atomic_write(config_path(), config)
     return config
 
 
-def set_sleep(value: int) -> dict[str, int | str]:
-    value = seconds(value, DEFAULT_SLEEP, allow_off=True)
+def set_lock(state: str, value: int) -> dict[str, Any]:
+    st = power_state(state)
     config = current_config()
-    config["sleep"] = value
+    # Same reasoning as set_screensaver, and it matters more here: a 0
+    # fallback would disable auto-lock on malformed input.
+    config["lock"][st] = seconds(value, DEFAULT_LOCK, allow_off=True)
     atomic_write(config_path(), config)
     return config
 
 
-def set_hibernate(value: int) -> dict[str, int | str]:
-    value = seconds(value, DEFAULT_HIBERNATE, allow_off=True)
+def set_display(state: str, value: int) -> dict[str, Any]:
+    st = power_state(state)
     config = current_config()
-    config["hibernate"] = value
+    config["display"][st] = seconds(value, DEFAULT_DISPLAY, allow_off=True)
+    atomic_write(config_path(), config)
+    return config
+
+
+def set_sleep(state: str, value: int) -> dict[str, Any]:
+    st = power_state(state)
+    config = current_config()
+    config["sleep"][st] = seconds(value, DEFAULT_SLEEP, allow_off=True)
+    atomic_write(config_path(), config)
+    return config
+
+
+def set_hibernate(state: str, value: int) -> dict[str, Any]:
+    st = power_state(state)
+    config = current_config()
+    config["hibernate"][st] = seconds(value, DEFAULT_HIBERNATE, allow_off=True)
     atomic_write(config_path(), config)
     return config
 
@@ -348,14 +390,14 @@ def hibernate_diagnostics() -> dict[str, Any]:
     """Report safe, read-only checks for common hibernation prerequisites."""
     issues: list[str] = []
 
-    power_state_path = diagnostic_path("SANDMAN_POWER_STATE_PATH", "/sys/power/state")
-    resume_path = diagnostic_path("SANDMAN_POWER_RESUME_PATH", "/sys/power/resume")
-    swaps_path = diagnostic_path("SANDMAN_PROC_SWAPS_PATH", "/proc/swaps")
-    meminfo_path = diagnostic_path("SANDMAN_PROC_MEMINFO_PATH", "/proc/meminfo")
+    power_state_path = diagnostic_path("POWERPLAN_POWER_STATE_PATH", "/sys/power/state")
+    resume_path = diagnostic_path("POWERPLAN_POWER_RESUME_PATH", "/sys/power/resume")
+    swaps_path = diagnostic_path("POWERPLAN_PROC_SWAPS_PATH", "/proc/swaps")
+    meminfo_path = diagnostic_path("POWERPLAN_PROC_MEMINFO_PATH", "/proc/meminfo")
     lockdown_path = diagnostic_path(
-        "SANDMAN_LOCKDOWN_PATH", "/sys/kernel/security/lockdown"
+        "POWERPLAN_LOCKDOWN_PATH", "/sys/kernel/security/lockdown"
     )
-    efi_path = diagnostic_path("SANDMAN_EFI_PATH", "/sys/firmware/efi")
+    efi_path = diagnostic_path("POWERPLAN_EFI_PATH", "/sys/firmware/efi")
 
     try:
         kernel_hibernate = "disk" in power_state_path.read_text(encoding="utf-8").split()
@@ -436,9 +478,11 @@ def configure_hibernate(value: int) -> None:
     """Set systemd's suspend-then-hibernate delay.
 
     systemd owns the RTC wake alarm needed while the computer is suspended, so
-    this drop-in is necessarily system-wide. The normal UI invokes a separately
-    installed, root-owned helper through pkexec. This development helper never
-    redirects its privileged write through the environment.
+    this drop-in is necessarily system-wide - one value in force at a time,
+    whichever side of the {ac, battery} pair is currently active. The normal
+    UI invokes a separately installed, root-owned helper through pkexec. This
+    development helper never redirects its privileged write through the
+    environment.
     """
     path = systemd_sleep_config_path()
     if os.geteuid() != 0:
@@ -457,11 +501,11 @@ def configure_hibernate(value: int) -> None:
         raise ConfigError(f"Could not update {path}: {error}") from error
 
 
-def set_lid(value: str) -> dict[str, int | str]:
+def set_lid(state: str, value: str) -> dict[str, Any]:
+    st = power_state(state)
     config = current_config()
-    config["lid"] = value
+    config["lid"][st] = lid_action(value)
     atomic_write(config_path(), config)
-    sync_hypr_lid_override(value)
     return config
 
 
@@ -489,20 +533,30 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("init")
     commands.add_parser("get")
     commands.add_parser("diagnose-hibernate")
-    screensaver = commands.add_parser("set-screensaver")
-    screensaver.add_argument("seconds", type=timeout)
-    display = commands.add_parser("set-display")
-    display.add_argument("seconds", type=timeout)
-    lock = commands.add_parser("set-lock")
-    lock.add_argument("seconds", type=timeout)
-    sleep = commands.add_parser("set-sleep")
-    sleep.add_argument("seconds", type=timeout)
-    hibernate = commands.add_parser("set-hibernate")
-    hibernate.add_argument("seconds", type=timeout)
+
+    def add_state_timeout(name: str) -> None:
+        sub = commands.add_parser(name)
+        sub.add_argument("state", choices=POWER_STATES)
+        sub.add_argument("seconds", type=timeout)
+
+    add_state_timeout("set-screensaver")
+    add_state_timeout("set-display")
+    add_state_timeout("set-lock")
+    add_state_timeout("set-sleep")
+    add_state_timeout("set-hibernate")
+
     configure_hibernate_parser = commands.add_parser("configure-hibernate")
     configure_hibernate_parser.add_argument("seconds", type=timeout)
+
     lid = commands.add_parser("set-lid")
+    lid.add_argument("state", choices=POWER_STATES)
     lid.add_argument("action", choices=LID_ACTIONS)
+
+    apply_effective_parser = commands.add_parser("apply-effective")
+    apply_effective_parser.add_argument("screensaver", type=timeout)
+    apply_effective_parser.add_argument("lock", type=timeout)
+    apply_effective_parser.add_argument("lid", choices=LID_ACTIONS)
+
     return result
 
 
@@ -516,22 +570,24 @@ def main() -> int:
         elif args.command == "diagnose-hibernate":
             config = hibernate_diagnostics()
         elif args.command == "set-screensaver":
-            config = set_screensaver(args.seconds)
+            config = set_screensaver(args.state, args.seconds)
         elif args.command == "set-display":
-            config = set_display(args.seconds)
+            config = set_display(args.state, args.seconds)
         elif args.command == "set-lock":
-            config = set_lock(args.seconds)
+            config = set_lock(args.state, args.seconds)
         elif args.command == "set-sleep":
-            config = set_sleep(args.seconds)
+            config = set_sleep(args.state, args.seconds)
         elif args.command == "set-hibernate":
-            config = set_hibernate(args.seconds)
+            config = set_hibernate(args.state, args.seconds)
         elif args.command == "configure-hibernate":
             configure_hibernate(args.seconds)
             config = {"hibernate": args.seconds}
+        elif args.command == "apply-effective":
+            config = apply_effective(args.screensaver, args.lock, args.lid)
         else:
-            config = set_lid(args.action)
+            config = set_lid(args.state, args.action)
     except ConfigError as error:
-        print(f"sandman: {error}", file=sys.stderr)
+        print(f"powerplan: {error}", file=sys.stderr)
         return 1
     print(json.dumps(config, separators=(",", ":")))
     return 0

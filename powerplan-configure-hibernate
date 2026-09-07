@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Privileged systemd sleep drop-in writer for Sandman."""
+"""Privileged systemd sleep drop-in writer for Power Plan."""
 
 import argparse
 import os
@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 MAX_TIMEOUT = 7 * 24 * 60 * 60
-CONFIG = Path("/etc/systemd/sleep.conf.d/90-sandman.conf")
+CONFIG = Path("/etc/systemd/sleep.conf.d/90-powerplan.conf")
 
 
 def seconds(raw: str) -> int:

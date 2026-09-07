@@ -161,6 +161,21 @@ Item {
     Qt.callLater(function() { root.idleMonitorRearming = false })
   }
 
+  // Keeps Omarchy's own native idle service and the Hyprland lid-binding
+  // override in sync with whichever values are effective right now. QML is
+  // the one thing that reliably knows the current AC/battery state moment-
+  // to-moment (via UPower), so it resolves the pairs and pushes the result
+  // down, rather than the Python helper re-reading power state itself and
+  // racing this signal. Called after any setting save succeeds, after init,
+  // and on every power-source flip (the stored config does not change then,
+  // but the effective value does).
+  function applyEffectiveSync() {
+    if (applyEffectiveProcess.running) return
+    applyEffectiveProcess.command = ["python3", root.helperPath, "apply-effective",
+      String(root.screensaverSeconds), String(root.lockSeconds), root.lidAction]
+    applyEffectiveProcess.running = true
+  }
+
   function resetScreensaverWindows() {
     root.screensaverWindows = ({})
     root.screensaverWindowCount = 0
@@ -303,7 +318,15 @@ Item {
     Component.onCompleted: running = true
     onExited: function(exitCode) {
       if (exitCode !== 0) root.lastError = "Could not initialize Power Plan settings"
+      else root.applyEffectiveSync()
       configFile.reload()
+    }
+  }
+
+  Process {
+    id: applyEffectiveProcess
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.lastError = "Could not sync the effective power settings"
     }
   }
 
@@ -328,6 +351,7 @@ Item {
     onExited: function(exitCode) {
       root.saving = false
       if (exitCode !== 0) root.lastError = "Could not save that setting"
+      else root.applyEffectiveSync()
       configFile.reload()
     }
   }
@@ -396,7 +420,10 @@ Item {
   // cycle happens to finish.
   Connections {
     target: UPower
-    function onOnBatteryChanged() { root.rearmIdleMonitor() }
+    function onOnBatteryChanged() {
+      root.rearmIdleMonitor()
+      root.applyEffectiveSync()
+    }
   }
 
   // Hyprland's Lua config parses `hyprctl dispatch` args as Lua, so the classic
