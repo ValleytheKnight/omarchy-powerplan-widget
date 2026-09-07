@@ -38,6 +38,13 @@ Item {
   property var availableProfiles: []
   property string acProfile: ""
   property string batteryProfile: ""
+  // Omarchy's own idle service marks Stay Awake by the presence of this
+  // file (see /usr/share/omarchy/shell/plugins/services/idle/Service.qml).
+  // A screensaver timeout set here does nothing while Stay Awake holds the
+  // native idle service off entirely, so the panel needs to know this too.
+  readonly property string stayAwakeStateDir: home + "/.local/state/omarchy/indicators"
+  readonly property string stayAwakeStatePath: stayAwakeStateDir + "/stay-awake"
+  property bool stayAwake: false
   readonly property int screensaverSeconds: Model.effectiveSeconds(configState.screensaver, root.onBattery, 150, true)
   readonly property int displaySeconds: Model.effectiveSeconds(configState.display, root.onBattery, 0, true)
   readonly property int lockSeconds: Model.effectiveSeconds(configState.lock, root.onBattery, 300, true)
@@ -433,6 +440,25 @@ Item {
     printErrors: false
     onLoaded: root.batteryProfile = String(text()).trim()
     onFileChanged: reload()
+  }
+
+  // Mirrors Omarchy's own idle service: Stay Awake is just this file's
+  // presence, so a plain existence check (not a content read) is enough.
+  Process {
+    id: stayAwakeProbe
+    command: ["bash", "-c", "if [[ -f \"" + root.stayAwakeStatePath + "\" ]]; then echo yes; else echo no; fi"]
+    stdout: SplitParser {
+      onRead: function(line) { root.stayAwake = String(line).trim() === "yes" }
+    }
+  }
+
+  FileView {
+    id: stayAwakeStateDirWatcher
+    path: root.stayAwakeStateDir
+    watchChanges: true
+    printErrors: false
+    onFileChanged: if (!stayAwakeProbe.running) stayAwakeProbe.running = true
+    Component.onCompleted: if (!stayAwakeProbe.running) stayAwakeProbe.running = true
   }
 
   IdleMonitor {

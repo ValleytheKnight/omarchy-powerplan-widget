@@ -27,6 +27,7 @@ Panel {
   readonly property int sleepSeconds: powerplanService ? powerplanService.sleepSeconds : 0
   readonly property int hibernateSeconds: powerplanService ? powerplanService.hibernateSeconds : 0
   readonly property bool lidPresent: powerplanService ? powerplanService.lidPresent : false
+  readonly property bool stayAwake: powerplanService ? powerplanService.stayAwake : false
   readonly property bool hibernateAvailable: powerplanService ? powerplanService.hibernateAvailable : false
   readonly property bool suspendThenHibernateAvailable: powerplanService ? powerplanService.suspendThenHibernateAvailable : false
   readonly property string hibernateDiagnostic: powerplanService ? powerplanService.hibernateDiagnostic : ""
@@ -276,9 +277,11 @@ Panel {
           panelOpen: root.opened
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
-          warningText: (root.screensaverSeconds > 0 && root.lockSeconds > 0 && root.lockSeconds <= root.screensaverSeconds)
-            ? "Auto-lock is set before the screen saver can appear."
-            : ""
+          warningText: root.stayAwake
+            ? "Stay Awake is on. The screen saver will not trigger until it's turned off."
+            : (root.screensaverSeconds > 0 && root.lockSeconds > 0 && root.lockSeconds <= root.screensaverSeconds)
+              ? "Auto-lock is set before the screen saver can appear."
+              : ""
           onSetValue: function(state, seconds) {
             if (root.powerplanService) root.powerplanService.setScreensaver(state, seconds)
           }
