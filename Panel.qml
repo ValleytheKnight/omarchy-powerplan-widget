@@ -13,8 +13,6 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
   property var powerplanService: null
-  // TEMPORARY, remove once trackpad scroll sensitivity is tuned correctly.
-  property string debugWheelText: "scroll to see wheel event values"
   readonly property var barIdentity: hostWidget || root
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
@@ -103,21 +101,16 @@ Panel {
         interactive: contentHeight > height
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-        WheelHandler {
-          // TEMPORARY DIAGNOSTIC: raising sensitivity made trackpad scroll
-          // worse, not better, which means the pixelDelta assumption itself
-          // is wrong for this platform rather than just mistuned. Falling
-          // back to the angleDelta-only formula as a known baseline while
-          // root.debugWheelText below reports the real raw values Qt is
-          // actually delivering on this trackpad, so the next fix is based
-          // on a measurement instead of another guess.
-          onWheel: function(event) {
-            root.debugWheelText = "pixelDelta.y=" + event.pixelDelta.y + "  angleDelta.y=" + event.angleDelta.y
-            if (event.angleDelta.y === 0) return
-            root.scrollPanel(-(event.angleDelta.y / 120) * Style.space(56))
-            event.accepted = true
-          }
-        }
+        // No custom wheel handling here. A WheelHandler was tried (this is
+        // Sandman's original approach) and confirmed dead on real hardware:
+        // it received zero events from either a trackpad or an actual mouse
+        // wheel, even with fresh code and a cleared QML cache. No stock
+        // Omarchy panel implements custom wheel scrolling either, which
+        // points at a platform-level limitation in how Quickshell panel
+        // windows deliver wheel input, not a bug in this file. Scrolling
+        // works fine through the ScrollBar drag above and keyboard
+        // navigation (PanelKeyCatcher's onMoveRequested -> scrollPanel)
+        // below, both already confirmed working.
 
         Column {
           id: content
@@ -155,17 +148,6 @@ Panel {
               font.pixelSize: Style.font.caption
             }
           }
-        }
-
-        // TEMPORARY diagnostic readout, remove once trackpad sensitivity
-        // is tuned from real numbers instead of a guess.
-        Text {
-          width: parent.width
-          text: root.debugWheelText
-          color: Color.accent
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.caption
-          horizontalAlignment: Text.AlignHCenter
         }
 
         PanelSeparator { width: parent.width }
