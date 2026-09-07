@@ -102,9 +102,15 @@ Panel {
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         WheelHandler {
+          // Scaled by the actual delta instead of a fixed step per event.
+          // 120 is Qt's standard "one notch" unit for a mouse wheel, so this
+          // keeps a single mouse click moving the same 56px as before, while
+          // a trackpad's many small delta events (often single digits) each
+          // move proportionally less, for smooth continuous scroll instead
+          // of the same fixed hop repeated many times per gesture.
           onWheel: function(event) {
             if (event.angleDelta.y === 0) return
-            root.scrollPanel(event.angleDelta.y > 0 ? -Style.space(56) : Style.space(56))
+            root.scrollPanel(-(event.angleDelta.y / 120) * Style.space(56))
             event.accepted = true
           }
         }
