@@ -10,14 +10,7 @@ Item {
   id: root
   
   property var shell: null
-  property var configState: ({
-  screensaver: { ac: 150, battery: 150 },
-  display: { ac: 0, battery: 0 },
-  lock: { ac: 300, battery: 300 },
-  sleep: { ac: 0, battery: 0 },
-  hibernate: { ac: 0, battery: 0 },
-  lid: { ac: "system", battery: "system" }
-  })
+  property var configState: Model.parseConfig("{}")
   readonly property bool onBattery: UPower.onBattery
   property bool saving: false
   property string lastError: ""
@@ -29,7 +22,7 @@ Item {
   property bool idleCycleRunning: false
   property bool idleMonitorRearming: false
   property var screensaverWindows: ({})
-  property int screensaverWindowCount: 0
+  readonly property int screensaverWindowCount: Object.keys(root.screensaverWindows).length
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string configPath: home + "/.config/omarchy/powerplan.json"
@@ -211,7 +204,6 @@ Item {
 
   function resetScreensaverWindows() {
     root.screensaverWindows = ({})
-    root.screensaverWindowCount = 0
   }
 
   function setScreensaverWindow(address, visible) {
@@ -221,7 +213,6 @@ Item {
     if (visible) next[key] = true
     else delete next[key]
     root.screensaverWindows = next
-    root.screensaverWindowCount = Object.keys(next).length
   }
 
   function eventParts(event, count) {
