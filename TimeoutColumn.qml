@@ -13,7 +13,6 @@ Column {
   property string stateLabel: ""
   property var presets: []
   property int currentSeconds: 0
-  property int defaultCustomSeconds: 300
   property bool enabled: true
   property bool saving: false
   property bool panelOpen: false
@@ -30,8 +29,30 @@ Column {
   property int customSecondsValue: 0
   readonly property int customTimeoutSeconds: Model.customSeconds(root.customHours, root.customMinutes, root.customSecondsValue)
 
+  // The three fields below only push into customHours/customMinutes/
+  // customSecondsValue when a SpinBox commits (Enter, Tab, or losing focus),
+  // which is standard Qt SpinBox behavior. Reading straight from each
+  // field's live typed text instead means Apply reacts as you type, not
+  // only after a commit - and a disabled Apply button never gets the click
+  // that would have caused a commit, so gating on the committed value alone
+  // could strand the button disabled no matter what you typed.
+  function liveFieldSeconds(field) {
+    var parsed = field.valueFromText(field.contentItem.text, field.locale)
+    return isFinite(parsed) ? parsed : 0
+  }
+
+  readonly property int liveCustomSeconds: root.customEditorOpen
+    ? Model.customSeconds(
+        root.liveFieldSeconds(hoursField.field),
+        root.liveFieldSeconds(minutesField.field),
+        root.liveFieldSeconds(secondsField.field))
+    : 0
+
+  // Seed only from a real current value. Guessing a default (e.g. 5 minutes)
+  // when the section is currently Off used to leave the fields pre-filled
+  // with a number nobody chose; start blank at 0:0:0 instead.
   function loadCustomTimeout() {
-    var parts = Model.customParts(root.currentSeconds > 0 ? root.currentSeconds : root.defaultCustomSeconds)
+    var parts = root.currentSeconds > 0 ? Model.customParts(root.currentSeconds) : { hours: 0, minutes: 0, seconds: 0 }
     root.customHours = parts.hours
     root.customMinutes = parts.minutes
     root.customSecondsValue = parts.seconds
@@ -48,7 +69,7 @@ Column {
   }
 
   function applyCustomTimeout() {
-    if (root.customTimeoutSeconds > 0) root.valueSelected(root.customTimeoutSeconds)
+    if (root.liveCustomSeconds > 0) root.valueSelected(root.liveCustomSeconds)
   }
 
   // Mirrors the reset Panel.qml used to do once for all five sections on
@@ -121,6 +142,7 @@ Column {
       spacing: Style.space(6)
 
       NumberField {
+        id: hoursField
         label: "Hours"
         value: root.customHours
         from: 0
@@ -132,6 +154,7 @@ Column {
       }
 
       NumberField {
+        id: minutesField
         label: "Minutes"
         value: root.customMinutes
         from: 0
@@ -143,6 +166,7 @@ Column {
       }
 
       NumberField {
+        id: secondsField
         label: "Seconds"
         value: root.customSecondsValue
         from: 0
@@ -157,7 +181,7 @@ Column {
     Button {
       width: parent.width
       text: "Apply"
-      enabled: !root.saving && root.enabled && root.customTimeoutSeconds > 0
+      enabled: !root.saving && root.enabled && root.liveCustomSeconds > 0
       focusable: true
       bordered: true
       foreground: root.foreground

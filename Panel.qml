@@ -272,7 +272,6 @@ Panel {
           description: "Start after inactivity"
           presets: Model.screensaverPresets
           pair: root.configState.screensaver
-          defaultCustomSeconds: 60
           saving: root.saving
           panelOpen: root.opened
           foreground: root.contentForeground
@@ -293,7 +292,6 @@ Panel {
           description: "Turn off the displays after inactivity"
           presets: Model.displayPresets
           pair: root.configState.display
-          defaultCustomSeconds: 300
           saving: root.saving
           panelOpen: root.opened
           foreground: root.contentForeground
@@ -314,7 +312,6 @@ Panel {
           description: "Lock the session after inactivity"
           presets: Model.lockPresets
           pair: root.configState.lock
-          defaultCustomSeconds: 300
           saving: root.saving
           panelOpen: root.opened
           foreground: root.contentForeground
@@ -332,7 +329,6 @@ Panel {
           description: "Suspend the computer after inactivity"
           presets: Model.sleepPresets
           pair: root.configState.sleep
-          defaultCustomSeconds: 900
           saving: root.saving
           panelOpen: root.opened
           foreground: root.contentForeground
@@ -357,7 +353,6 @@ Panel {
             description: "Wake from suspend and hibernate after this delay"
             presets: Model.hibernatePresets
             pair: root.configState.hibernate
-            defaultCustomSeconds: 3600
             enabled: root.suspendThenHibernateAvailable
             saving: root.saving
             panelOpen: root.opened

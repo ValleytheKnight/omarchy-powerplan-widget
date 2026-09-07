@@ -13,7 +13,6 @@ Column {
   property string description: ""
   property var presets: []
   property var pair: ({ ac: 0, battery: 0 })
-  property int defaultCustomSeconds: 300
   property bool enabled: true
   property bool saving: false
   property bool panelOpen: false
@@ -50,7 +49,6 @@ Column {
       stateLabel: "Plugged in"
       presets: root.presets
       currentSeconds: root.pair.ac
-      defaultCustomSeconds: root.defaultCustomSeconds
       enabled: root.enabled
       saving: root.saving
       panelOpen: root.panelOpen
@@ -64,7 +62,6 @@ Column {
       stateLabel: "On battery"
       presets: root.presets
       currentSeconds: root.pair.battery
-      defaultCustomSeconds: root.defaultCustomSeconds
       enabled: root.enabled
       saving: root.saving
       panelOpen: root.panelOpen
