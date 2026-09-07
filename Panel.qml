@@ -319,6 +319,9 @@ Panel {
           panelOpen: root.opened
           foreground: root.contentForeground
           fontFamily: root.contentFontFamily
+          warningText: root.stayAwake
+            ? "Stay Awake is on. Auto-lock will not trigger until it's turned off."
+            : ""
           onSetValue: function(state, seconds) {
             if (root.powerplanService) root.powerplanService.setLock(state, seconds)
           }
