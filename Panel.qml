@@ -103,16 +103,18 @@ Panel {
 
         WheelHandler {
           // A trackpad on Wayland reports real pixel counts via pixelDelta,
-          // not the coarse angleDelta a mouse wheel sends (angleDelta is
-          // often a small synthesized value for touchpad events, which is
-          // why scaling only that felt just as sluggish). Prefer pixelDelta
-          // when the device provides it - a direct 1:1 pixel mapping is
-          // what "smooth scroll" actually means - and fall back to
-          // angleDelta / 120 (Qt's one-notch unit) for a real wheel, which
-          // keeps a single click moving the same 56px as before.
+          // not the coarse angleDelta a mouse wheel sends. A bare 1:1
+          // pixelDelta mapping tracked gesture size proportionally but
+          // still felt too slow on real hardware, so trackpadSensitivity
+          // boosts it to a comfortable feel. Tune this single number if it
+          // still feels off in either direction. Falls back to angleDelta
+          // / 120 (Qt's one-notch unit) for a real mouse wheel, keeping a
+          // single click at the original 56px.
+          readonly property real trackpadSensitivity: 2.5
+
           onWheel: function(event) {
             var raw = event.pixelDelta.y !== 0
-              ? event.pixelDelta.y
+              ? event.pixelDelta.y * trackpadSensitivity
               : (event.angleDelta.y / 120) * Style.space(56)
             if (raw === 0) return
             root.scrollPanel(-raw)
