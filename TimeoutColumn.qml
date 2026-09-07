@@ -25,7 +25,7 @@ Column {
   readonly property bool usesPreset: Model.isPreset(root.currentSeconds, root.presets)
   property bool customEditorOpen: !root.usesPreset
   property int customHours: 0
-  property int customMinutes: 1
+  property int customMinutes: 0
   property int customSecondsValue: 0
   readonly property int customTimeoutSeconds: Model.customSeconds(root.customHours, root.customMinutes, root.customSecondsValue)
 
@@ -56,6 +56,13 @@ Column {
     root.customHours = parts.hours
     root.customMinutes = parts.minutes
     root.customSecondsValue = parts.seconds
+  }
+
+  // onPanelOpenChanged only fires on a transition. A column created while
+  // the panel is already open (the normal case) never sees that transition,
+  // so a section already holding a real custom value needs seeding here too.
+  Component.onCompleted: {
+    if (root.customEditorOpen) root.loadCustomTimeout()
   }
 
   function openCustomEditor() {
