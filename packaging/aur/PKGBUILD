@@ -1,0 +1,16 @@
+# Maintainer: ValleytheKnight
+pkgname=omarchy-powerplan-helper
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Privileged suspend-then-hibernate helper for the Omarchy Power Plan bar plugin"
+arch=('any')
+url="https://github.com/ValleytheKnight/omarchy-powerplan-widget"
+license=('MIT')
+depends=('python')
+source=("powerplan-configure-hibernate::${url}/raw/v${pkgver}/powerplan-configure-hibernate")
+sha256sums=('89b059152cd94cca3cffa213b3cd996c339c63718b2ed5c8030aee7806d73b3c')
+
+package() {
+  install -Dm755 "${srcdir}/powerplan-configure-hibernate" \
+    "${pkgdir}/usr/lib/omarchy-powerplan/powerplan-configure-hibernate"
+}

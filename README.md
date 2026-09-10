@@ -34,31 +34,25 @@ Off as `0`.
 omarchy plugin add https://github.com/ValleytheKnight/omarchy-powerplan-widget.git --enable
 ```
 
-Install the privileged helper from the user-owned plugin checkout, then
-restart the shell if it is already running:
+Build and install the privileged helper as a pacman package, then restart
+the shell if it is already running:
 
 ```sh
-sudo python3 -c "$(cat ~/.config/omarchy/plugins/valleytheknight.powerplan/scripts/install-privileged-helper)" \
-  ~/.config/omarchy/plugins/valleytheknight.powerplan/powerplan-configure-hibernate
+git clone https://github.com/ValleytheKnight/omarchy-powerplan-widget.git
+cd omarchy-powerplan-widget/packaging/aur
+makepkg -si
 omarchy restart shell
 ```
 
-The two halves of that command are protected differently, because they
-face different problems.
-
-Your shell reads the installer and passes its text to `sudo` as an
-argument. The text is captured before `sudo` starts. Root never reopens
-that path. Nothing rewritten in the checkout during the password prompt
-can change what root runs.
-
-Root must open the helper binary itself, after authenticating. The
-installer opens it with `O_NOFOLLOW`. It confirms the descriptor is a
-regular file, not group- or world-writable, owned by root or by you. It
-checks the SHA-256 against a digest pinned from the reviewed release. It
-copies from that descriptor into a root-owned staging file in
-`/usr/local/libexec`, re-checks the digest of what it wrote, sets mode
-`0755`, and renames it into place atomically. A mismatch aborts and
-removes the staging file. The destination keeps whatever it already had.
+The helper ships as its own package instead of a script run directly from
+this plugin's user-writable checkout. `makepkg` fetches the helper's
+source and checks it against a checksum pinned in that package's
+`PKGBUILD` before building anything; `pacman` then installs the finished
+package to `/usr/lib/omarchy-powerplan/powerplan-configure-hibernate`.
+Root's `pacman -U` step only ever installs from the package `pacman`
+built and tracks in its own database. It never opens or interprets a
+file sitting in this checkout, so a local process that swaps files here
+cannot change what root runs.
 
 If needed, add it to the bar explicitly:
 
@@ -151,7 +145,7 @@ qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml Service.qml LidService.
 omarchy plugin remove valleytheknight.powerplan
 rm -f ~/.config/omarchy/powerplan.json
 sudo rm -f /etc/systemd/sleep.conf.d/90-powerplan.conf
-sudo rm -f /usr/local/libexec/powerplan-configure-hibernate
+sudo pacman -R omarchy-powerplan-helper
 ```
 
 Removing Power Plan does not revert the screen-saver and lock timeouts
