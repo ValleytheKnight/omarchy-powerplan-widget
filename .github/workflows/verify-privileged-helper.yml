@@ -1,0 +1,38 @@
+name: Verify privileged helper
+
+on:
+  push:
+    paths:
+      - powerplan-configure-hibernate
+      - scripts/install-privileged-helper
+      - test/test_install_privileged_helper.py
+      - .github/workflows/verify-privileged-helper.yml
+  pull_request:
+    paths:
+      - powerplan-configure-hibernate
+      - scripts/install-privileged-helper
+      - test/test_install_privileged_helper.py
+      - .github/workflows/verify-privileged-helper.yml
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare EXPECTED_SHA256 against the actual helper digest
+        run: |
+          set -euo pipefail
+          actual="$(sha256sum powerplan-configure-hibernate | cut -d' ' -f1)"
+          pinned="$(grep -oP '(?<=EXPECTED_SHA256 = ")[0-9a-f]{64}' scripts/install-privileged-helper)"
+          if [ "$actual" != "$pinned" ]; then
+            echo "EXPECTED_SHA256 in scripts/install-privileged-helper is stale."
+            echo "  pinned: $pinned"
+            echo "  actual: $actual"
+            echo "Update EXPECTED_SHA256 to match the current powerplan-configure-hibernate."
+            exit 1
+          fi
+          echo "EXPECTED_SHA256 matches powerplan-configure-hibernate ($actual)."
+
+      - name: Verify the installer rejects unreviewed bytes
+        run: sudo python3 -m unittest discover -s test -p 'test_install_privileged_helper.py' -v

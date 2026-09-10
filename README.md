@@ -38,11 +38,27 @@ Install the privileged helper from the user-owned plugin checkout, then
 restart the shell if it is already running:
 
 ```sh
-sudo install -D -o root -g root -m 0755 \
-  ~/.config/omarchy/plugins/valleytheknight.powerplan/powerplan-configure-hibernate \
-  /usr/local/libexec/powerplan-configure-hibernate
+sudo python3 -c "$(cat ~/.config/omarchy/plugins/valleytheknight.powerplan/scripts/install-privileged-helper)" \
+  ~/.config/omarchy/plugins/valleytheknight.powerplan/powerplan-configure-hibernate
 omarchy restart shell
 ```
+
+The two halves of that command are protected differently, because they
+face different problems.
+
+Your shell reads the installer and passes its text to `sudo` as an
+argument. The text is captured before `sudo` starts. Root never reopens
+that path. Nothing rewritten in the checkout during the password prompt
+can change what root runs.
+
+Root must open the helper binary itself, after authenticating. The
+installer opens it with `O_NOFOLLOW`. It confirms the descriptor is a
+regular file, not group- or world-writable, owned by root or by you. It
+checks the SHA-256 against a digest pinned from the reviewed release. It
+copies from that descriptor into a root-owned staging file in
+`/usr/local/libexec`, re-checks the digest of what it wrote, sets mode
+`0755`, and renames it into place atomically. A mismatch aborts and
+removes the staging file. The destination keeps whatever it already had.
 
 If needed, add it to the bar explicitly:
 

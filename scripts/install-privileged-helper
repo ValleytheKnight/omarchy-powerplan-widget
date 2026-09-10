@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""Installs powerplan-configure-hibernate as a root-owned executable.
+
+Binds the install to a pinned digest of the reviewed release instead of
+trusting whatever bytes sit at the source path at read time, closing the
+window between sudo authentication and file copy where a local process
+could swap the source and get arbitrary bytes installed as root.
+"""
+
+import hashlib
+import os
+import stat
+import sys
+from pathlib import Path
+from typing import NoReturn
+
+# Update by hand whenever powerplan-configure-hibernate changes:
+#   sha256sum powerplan-configure-hibernate
+# .github/workflows/verify-privileged-helper.yml fails CI if this value and
+# the file's actual digest ever disagree, so a forgotten update is caught
+# at review time, not silently at a user's install time.
+EXPECTED_SHA256 = "89b059152cd94cca3cffa213b3cd996c339c63718b2ed5c8030aee7806d73b3c"
+DEST = Path("/usr/local/libexec/powerplan-configure-hibernate")
+
+
+def fail(message: str) -> NoReturn:
+    print(f"install-privileged-helper: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main() -> int:
+    if os.geteuid() != 0:
+        fail("must run as root (sudo)")
+    if len(sys.argv) != 2:
+        fail("usage: install-privileged-helper <source-path>")
+
+    source = Path(sys.argv[1])
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(source, flags)
+    except OSError as error:
+        fail(f"cannot open source: {error}")
+
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            fail("source is not a regular file")
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            fail("source is group- or world-writable")
+        invoking_uid_raw = os.environ.get("SUDO_UID")
+        invoking_uid = int(invoking_uid_raw) if invoking_uid_raw else None
+        if info.st_uid != 0 and info.st_uid != invoking_uid:
+            fail("source is not owned by root or the invoking user")
+        data = os.read(fd, info.st_size + 1)
+        if len(data) != info.st_size:
+            fail("source changed size while reading")
+    finally:
+        os.close(fd)
+
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != EXPECTED_SHA256:
+        fail(
+            "source digest does not match the reviewed release "
+            f"(got {digest}, expected {EXPECTED_SHA256})"
+        )
+
+    try:
+        DEST.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+        parent_info = os.stat(DEST.parent)
+    except OSError as error:
+        fail(f"cannot prepare {DEST.parent}: {error}")
+    if parent_info.st_uid != 0:
+        fail(f"{DEST.parent} is not owned by root")
+    if parent_info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        fail(f"{DEST.parent} is group- or world-writable")
+
+    staging = DEST.with_name(f".{DEST.name}.staging")
+    try:
+        staging.unlink(missing_ok=True)
+        fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError as error:
+        fail(f"cannot create staging file: {error}")
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chown(staging, 0, 0)
+        if hashlib.sha256(staging.read_bytes()).hexdigest() != EXPECTED_SHA256:
+            fail("installed file digest mismatch after copy")
+        os.chmod(staging, 0o755)
+        os.replace(staging, DEST)
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
+
+    print(f"Installed {DEST} (sha256 {digest})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
