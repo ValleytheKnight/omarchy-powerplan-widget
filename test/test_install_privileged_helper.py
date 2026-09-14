@@ -77,7 +77,15 @@ class InstallerShebangTest(unittest.TestCase):
             timeout=10,
         )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("missing or empty", result.stderr)
+        # This exec happens against whatever /usr/bin/pkexec this machine
+        # actually has (PKEXEC is a pinned absolute path, not resolved
+        # through fakebin on PATH). A box without pkexec/polkit installed
+        # bails out earlier with a different message; either way, the
+        # tampered signature must never reach the elevated install step.
+        self.assertTrue(
+            "missing or empty" in result.stderr or "not found" in result.stderr,
+            result.stderr,
+        )
         self.assertNotIn("PKEXEC_RAN", result.stdout)
 
     def test_direct_exec_isolated_mode_ignores_decoy_module(self):
@@ -114,6 +122,21 @@ class InstallerUnprivilegedUnitTest(unittest.TestCase):
         )
         self.repo_root_patch.start()
         self.addCleanup(self.repo_root_patch.stop)
+
+        # PKEXEC/SH are pinned absolute paths by design (see module
+        # docstring); this class mocks subprocess.run so no real pkexec
+        # call happens, but the presence check ahead of it must not
+        # depend on whether this machine actually has pkexec installed.
+        real_isfile = os.path.isfile
+
+        def fake_isfile(path):
+            if path in (self.module.PKEXEC, self.module.SH):
+                return True
+            return real_isfile(path)
+
+        self.isfile_patch = mock.patch("os.path.isfile", side_effect=fake_isfile)
+        self.isfile_patch.start()
+        self.addCleanup(self.isfile_patch.stop)
 
     def release_file(self, name):
         return self.checkout / "packaging" / "release" / name
