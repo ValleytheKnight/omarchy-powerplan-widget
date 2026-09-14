@@ -1,0 +1,69 @@
+#!/usr/bin/python3
+"""Build and sign a release of the privileged helper package.
+
+Maintainer-only. Run this yourself, from the repository root, whenever
+`powerplan-configure-hibernate` changes and needs a new signed release:
+
+    ./scripts/release-helper --key <YOUR_KEY_FINGERPRINT_OR_EMAIL>
+
+This is not part of the security-critical install path end users run;
+it is the tool that produces the artifacts scripts/install-privileged-helper
+verifies. It builds unprivileged via makepkg, then signs the built
+package with `gpg --detach-sign` using your key (you'll be prompted for
+your passphrase), and writes both files into packaging/release/ under
+a fixed name so the installer doesn't need to know the current version.
+
+After running this, commit packaging/release/omarchy-powerplan-helper.pkg.tar.zst
+and its .sig.
+"""
+import argparse
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+PKGBUILD_DIR = ROOT / "packaging" / "aur"
+RELEASE_DIR = ROOT / "packaging" / "release"
+CANONICAL_NAME = "omarchy-powerplan-helper.pkg.tar.zst"
+
+
+def run(cmd, **kwargs):
+    print(f"+ {' '.join(cmd)}")
+    subprocess.run(cmd, check=True, **kwargs)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--key", required=True, help="signing key fingerprint or identity")
+    args = parser.parse_args()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        build_dir = Path(tmp)
+        shutil.copy(PKGBUILD_DIR / "PKGBUILD", build_dir / "PKGBUILD")
+
+        run(["makepkg", "-f"], cwd=build_dir)
+
+        built = sorted(build_dir.glob("*.pkg.tar.zst"))
+        if len(built) != 1:
+            print(f"release-helper: expected exactly one built package, found {built}", file=sys.stderr)
+            sys.exit(1)
+        built_pkg = built[0]
+
+        RELEASE_DIR.mkdir(parents=True, exist_ok=True)
+        dest_pkg = RELEASE_DIR / CANONICAL_NAME
+        dest_sig = RELEASE_DIR / f"{CANONICAL_NAME}.sig"
+        shutil.copy(built_pkg, dest_pkg)
+
+        run([
+            "gpg", "--detach-sign", "--local-user", args.key,
+            "-o", str(dest_sig), str(dest_pkg),
+        ])
+
+    print(f"release-helper: wrote {dest_pkg} and {dest_sig}")
+    print("release-helper: verify, then commit both files.")
+
+
+if __name__ == "__main__":
+    main()

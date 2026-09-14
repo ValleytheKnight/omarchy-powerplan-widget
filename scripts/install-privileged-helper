@@ -1,0 +1,163 @@
+#!/usr/bin/python3 -I
+"""Install the Power Plan privileged helper from a maintainer-signed
+pacman package, without ever letting root open, interpret, or resolve
+a path inside this checkout.
+
+Run this yourself, as your own user, from the repository root:
+
+    ./scripts/install-privileged-helper
+
+It elevates itself via pkexec for the one step that needs root; do not
+sudo or pkexec this script directly. Before the first run on a machine,
+you must import and locally sign the maintainer's key once (see
+README.md) so pacman has a reason to trust the signature this script
+checks.
+
+Design: this reads the committed release package and its detached
+signature into memory exactly once, then hands those exact bytes to a
+single fixed pkexec command. The interpreter (this script's own
+shebang), pkexec, and the shell it runs are all invoked by absolute
+path, never resolved through this process's own PATH: `/usr/bin/env`
+and a bare `python3`/`pkexec`/`sh` all get resolved against the
+*caller's* environment, and pkexec elevates before it would notice the
+difference. A same-uid process that plants an earlier PATH entry named
+`python3` (to hijack this script before it even runs) or `pkexec`/`sh`
+(to hijack the elevation step) would otherwise get it executed instead.
+
+Root's command is a hardcoded shell one-liner (no interpolated
+untrusted data, no path inside this checkout): it creates its own
+freshly-named, root-owned staging directory via `mktemp -d` (so there
+is no fixed path for anything to have pre-created or symlinked), writes
+the package from stdin and the signature from a literal argument, and
+verifies the signature against pacman's own trusted keyring with
+`pacman-key --verify` before ever calling `pacman -U`. Any truncation,
+corruption, or substitution of the package invalidates the signature,
+so there is no separate digest check to keep in sync: the signature
+check *is* the integrity check, over the whole package, not one member
+of it. There is no unsigned or partially-checked path anywhere here.
+
+This closes the TOCTOU between build and privileged install, and it
+authenticates the package as a whole, not just a piece of it. It does
+not, and cannot by itself, protect against a local process that
+rewrites this very script before you run it, or that plants an earlier
+PATH entry your shell resolves before your own repository's `python3`
+(closed here by pinning the interpreter as well as pkexec and sh, but
+not closeable for the initial `./scripts/install-privileged-helper`
+invocation itself, which is always resolved by your shell however your
+shell resolves relative paths). Closing that residual needs a trust
+anchor even further outside this checkout than the signature already
+provides; a compromised PATH that predates this script's first run is
+outside what any install script can defend against on its own.
+"""
+import base64
+import os
+import stat
+import subprocess
+import sys
+
+PROGNAME = "install-privileged-helper"
+PACKAGE_NAME = "omarchy-powerplan-helper.pkg.tar.zst"
+RELEASE_DIR = "packaging/release"
+PKEXEC = "/usr/bin/pkexec"
+SH = "/usr/bin/sh"
+
+
+def fail(message):
+    print(f"{PROGNAME}: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def repo_root():
+    return os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+
+def read_verified_file(path, *, required=True):
+    """Open with O_NOFOLLOW, check it's a regular, non-group/other-writable
+    file owned by root or the invoking user, then read it in one pass."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        if not required and getattr(exc, "errno", None) == 2:
+            return None
+        fail(f"cannot open {path}: {exc}")
+
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            fail(f"{path} is not a regular file")
+        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            fail(f"{path} is group- or world-writable, refusing to use it")
+        if st.st_uid not in (0, os.getuid()):
+            fail(f"{path} is not owned by root or by you, refusing to use it")
+        try:
+            with os.fdopen(fd, "rb") as f:
+                fd = -1
+                return f.read()
+        except OSError as exc:
+            fail(f"cannot read {path}: {exc}")
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
+def main():
+    if os.geteuid() == 0:
+        fail("run as your own user; this elevates itself via pkexec")
+
+    if len(sys.argv) != 1:
+        fail(f"usage: {PROGNAME}  (run from the repository, takes no arguments)")
+
+    for prog in (PKEXEC, SH):
+        if not os.path.isfile(prog):
+            fail(f"{prog} not found; this script requires absolute, known-good paths")
+
+    release_dir = os.path.join(repo_root(), RELEASE_DIR)
+    pkg_path = os.path.join(release_dir, PACKAGE_NAME)
+    sig_path = pkg_path + ".sig"
+
+    pkg_bytes = read_verified_file(pkg_path)
+    sig_bytes = read_verified_file(sig_path)
+    if not sig_bytes:
+        fail(f"{sig_path} is missing or empty; refusing to install an unsigned package")
+
+    sig_b64 = base64.b64encode(sig_bytes).decode("ascii")
+
+    # STAGE is created fresh by mktemp -d inside the elevated shell, so
+    # there is no fixed path for anything to have pre-created, chmod'd,
+    # or symlinked before this runs, unlike a hardcoded staging path.
+    install_command = (
+        f"set -e; "
+        f"STAGE=$(mktemp -d); "
+        f"trap 'rm -rf \"$STAGE\"' EXIT; "
+        f"umask 077; "
+        f'cat > "$STAGE/pkg.tar.zst"; '
+        f"printf '%s' '{sig_b64}' | base64 -d > \"$STAGE/pkg.tar.zst.sig\"; "
+        f'pacman-key --verify "$STAGE/pkg.tar.zst.sig" "$STAGE/pkg.tar.zst"; '
+        f'pacman -U --noconfirm "$STAGE/pkg.tar.zst"'
+    )
+
+    try:
+        install = subprocess.run(
+            [PKEXEC, SH, "-c", install_command],
+            input=pkg_bytes,
+        )
+    except FileNotFoundError as exc:
+        fail(f"could not run {PKEXEC}: {exc}")
+    except PermissionError as exc:
+        fail(f"could not run {PKEXEC}: {exc}")
+
+    if install.returncode == 126:
+        fail("authorization was cancelled or denied")
+    if install.returncode == 127:
+        fail(
+            f"{PKEXEC} failed: not authorized (no authentication agent, "
+            "wrong password), or it could not run its target"
+        )
+    if install.returncode != 0:
+        fail(f"failed to install the helper as root (exit {install.returncode})")
+
+    print(f"{PROGNAME}: installed {PACKAGE_NAME}")
+
+
+if __name__ == "__main__":
+    main()

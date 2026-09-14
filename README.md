@@ -34,25 +34,50 @@ Off as `0`.
 omarchy plugin add https://github.com/ValleytheKnight/omarchy-powerplan-widget.git --enable
 ```
 
-Build and install the privileged helper as a pacman package, then restart
-the shell if it is already running:
+The privileged helper installs as a pacman package signed by the
+maintainer's key, not built or self-signed on your machine:
 
 ```sh
 git clone https://github.com/ValleytheKnight/omarchy-powerplan-widget.git
-cd omarchy-powerplan-widget/packaging/aur
-makepkg -si
+cd omarchy-powerplan-widget
+```
+
+Before your first install on a given machine, trust that key once, the
+same way you'd trust any third-party repository's signing key:
+
+```sh
+sudo pacman-key --add packaging/keys/valleytheknight-powerplan.asc
+sudo pacman-key --lsign-key A8238083DE096BC875CD1EB572BD2077B316056A
+```
+
+One-time per machine. After this, every install or update from this
+key is verified automatically, no repeated trust decision.
+
+Then install the helper, and restart the shell if it is already
+running:
+
+```sh
+./scripts/install-privileged-helper
 omarchy restart shell
 ```
 
-The helper ships as its own package instead of a script run directly from
-this plugin's user-writable checkout. `makepkg` fetches the helper's
-source and checks it against a checksum pinned in that package's
-`PKGBUILD` before building anything; `pacman` then installs the finished
-package to `/usr/lib/omarchy-powerplan/powerplan-configure-hibernate`.
-Root's `pacman -U` step only ever installs from the package `pacman`
-built and tracks in its own database. It never opens or interprets a
-file sitting in this checkout, so a local process that swaps files here
-cannot change what root runs.
+`install-privileged-helper` runs as your own user. It reads the
+pre-built, pre-signed package and its signature from
+`packaging/release/` once, then pipes those exact bytes to a single
+`pkexec` command. This script's own interpreter, `pkexec`, and the
+shell it runs are all invoked by absolute path, never resolved through
+this process's own `PATH`. Root stages the bytes in a directory it
+creates itself, verifies the signature against pacman's own trusted
+keyring with `pacman-key --verify`, and only then runs `pacman -U`.
+Any tampering or truncation invalidates the signature, so the
+signature check covers the whole package, not a piece of it, and root
+never installs anything that wasn't verified against the key you
+trusted above.
+
+Residual: a local process that can already write to your clone could
+still rewrite the installer itself before you run it. No install
+script can protect against that; it's the same trust the first command
+you ever type from a checkout always requires.
 
 If needed, add it to the bar explicitly:
 
@@ -126,6 +151,7 @@ lockdown. **Off** remains available so an old setting can always be cleared.
 - UPower
 - GLib (`gdbus`)
 - Polkit (`pkexec`), to change the systemd hibernate delay
+- `pacman-key` (part of pacman), to install and verify the privileged helper
 
 The helper is deliberately separate from `powerplan.py`, because the latter
 is loaded from the user-owned plugin directory and must never be executed
@@ -145,7 +171,7 @@ qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml Service.qml LidService.
 omarchy plugin remove valleytheknight.powerplan
 rm -f ~/.config/omarchy/powerplan.json
 sudo rm -f /etc/systemd/sleep.conf.d/90-powerplan.conf
-sudo pacman -R omarchy-powerplan-helper
+sudo pacman -Rns omarchy-powerplan-helper
 ```
 
 Removing Power Plan does not revert the screen-saver and lock timeouts

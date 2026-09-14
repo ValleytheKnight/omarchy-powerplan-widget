@@ -4,12 +4,18 @@ on:
   push:
     paths:
       - powerplan-configure-hibernate
-      - packaging/aur/PKGBUILD
+      - scripts/install-privileged-helper
+      - scripts/release-helper
+      - packaging/**
+      - test/**
       - .github/workflows/verify-privileged-helper.yml
   pull_request:
     paths:
       - powerplan-configure-hibernate
-      - packaging/aur/PKGBUILD
+      - scripts/install-privileged-helper
+      - scripts/release-helper
+      - packaging/**
+      - test/**
       - .github/workflows/verify-privileged-helper.yml
 
 jobs:
@@ -17,6 +23,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install libarchive-tools for bsdtar
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools
 
       - name: Compare PKGBUILD sha256sums against the actual helper digest
         run: |
@@ -27,8 +40,36 @@ jobs:
             echo "sha256sums in packaging/aur/PKGBUILD is stale."
             echo "  pinned: $pinned"
             echo "  actual: $actual"
-            echo "Update sha256sums to match the current powerplan-configure-hibernate,"
-            echo "and bump pkgver if this is a real change to the helper."
             exit 1
           fi
           echo "PKGBUILD sha256sums matches powerplan-configure-hibernate ($actual)."
+
+      - name: Verify the committed release package's signature and contents
+        run: |
+          set -euo pipefail
+          PKG=packaging/release/omarchy-powerplan-helper.pkg.tar.zst
+          SIG="$PKG.sig"
+          KEY=$(ls packaging/keys/*.asc 2>/dev/null | head -1 || true)
+
+          if [ ! -f "$PKG" ] || [ ! -f "$SIG" ] || [ -z "$KEY" ]; then
+            echo "No committed release package, signature, or maintainer key yet; skipping."
+            echo "This check becomes required once packaging/release/ and packaging/keys/ are populated."
+            exit 0
+          fi
+
+          GNUPGHOME=$(mktemp -d)
+          export GNUPGHOME
+          gpg --batch --import "$KEY"
+          gpg --batch --verify "$SIG" "$PKG"
+
+          bsdtar -O -xf "$PKG" usr/lib/omarchy-powerplan/powerplan-configure-hibernate > /tmp/extracted-helper
+          if ! cmp -s /tmp/extracted-helper powerplan-configure-hibernate; then
+            echo "The helper inside packaging/release/'s package does not match the tracked"
+            echo "powerplan-configure-hibernate. The release is stale; re-run scripts/release-helper."
+            exit 1
+          fi
+          echo "Release package signature is valid and its contents match the tracked source."
+
+      - name: Run the test suite
+        run: |
+          npm test --silent
