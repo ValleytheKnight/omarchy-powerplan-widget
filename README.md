@@ -164,8 +164,14 @@ as root.
 ```sh
 npm test
 omarchy plugin validate .
-qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml Service.qml LidService.qml TimeoutColumn.qml TimeoutSection.qml LidActionColumn.qml
+/usr/lib/qt6/bin/qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml Service.qml LidService.qml TimeoutColumn.qml TimeoutSection.qml LidActionColumn.qml
 ```
+
+Use the Qt6 `qmllint` explicitly. On a system with both Qt5 and Qt6
+installed, the plain `qmllint` on `PATH` usually resolves to Qt5's
+build (from `qt5-declarative`), which can't resolve this project's Qt6
+Quickshell module types and aborts silently instead of reporting an
+error.
 
 ## Remove
 
