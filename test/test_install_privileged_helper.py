@@ -91,10 +91,19 @@ class InstallerShebangTest(unittest.TestCase):
     def test_direct_exec_isolated_mode_ignores_decoy_module(self):
         # A same-uid decoy module in scripts/ must not get imported ahead
         # of the real stdlib module of the same name when run via the
-        # shebang, since that's the whole point of `-I`.
+        # shebang, since that's the whole point of `-I`. The decoy
+        # raises at import time, not when a function is later called, so
+        # this is caught at process startup regardless of what main()
+        # does afterward. The release is also tampered so a correctly
+        # isolated run fails fast on the signature check instead of ever
+        # reaching the real pkexec step: on this machine pkexec has been
+        # confirmed to run its target as root with no prompt at all, so
+        # letting a passing test reach it for real would silently give
+        # garbage bytes root on every test run.
         (self.checkout / "scripts" / "base64.py").write_text(
-            "def b64encode(_):\n    raise AssertionError('decoy module was imported')\n"
+            "raise AssertionError('decoy module was imported')\n"
         )
+        (self.checkout / "packaging" / "release" / "omarchy-powerplan-helper.pkg.tar.zst.sig").write_bytes(b"")
         env = dict(os.environ)
         env["PATH"] = f"{self.fakebin}:{env.get('PATH', '')}"
         result = subprocess.run(
