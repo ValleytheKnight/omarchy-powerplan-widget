@@ -13,7 +13,6 @@ Column {
   property string description: ""
   property var presets: []
   property var pair: ({ ac: 0, battery: 0 })
-  property bool enabled: true
   property bool saving: false
   property bool panelOpen: false
   property string warningText: ""

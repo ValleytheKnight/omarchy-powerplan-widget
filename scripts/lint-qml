@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Runs Qt6's qmllint against every QML file in this plugin.
+#
+# Two things a plain `qmllint -I "$OMARCHY_PATH/shell" *.qml` gets wrong:
+#
+# 1. Plain `qmllint` on PATH is usually Qt5's build (qt5-declarative) on a
+#    system with both Qt5 and Qt6 installed. It can't resolve this
+#    project's Qt6 Quickshell module types and aborts silently (exit 255,
+#    no output) instead of reporting an error. Qt6's own qmllint, at
+#    /usr/lib/qt6/bin/qmllint, works correctly.
+# 2. `import qs.Commons` / `import qs.Ui` resolve at runtime because
+#    Quickshell registers its own shell root under the virtual "qs"
+#    namespace; qmllint has no equivalent trick and can't resolve them
+#    from a plain -I path pointed at that root directly. Aliasing "qs" to
+#    that root via a symlink one directory up fixes it, and cuts the
+#    warning count roughly in half by resolving cascading false
+#    positives from every type qs.Commons/qs.Ui would have provided.
+set -euo pipefail
+
+if [ -z "${OMARCHY_PATH:-}" ]; then
+  echo "lint-qml: OMARCHY_PATH is not set; source the Omarchy bash env first" >&2
+  exit 1
+fi
+
+QMLLINT=/usr/lib/qt6/bin/qmllint
+if [ ! -x "$QMLLINT" ]; then
+  echo "lint-qml: $QMLLINT not found; install qt6-declarative" >&2
+  exit 1
+fi
+
+QS_ALIAS=$(mktemp -d)
+trap 'rm -rf "$QS_ALIAS"' EXIT
+ln -s "$OMARCHY_PATH/shell" "$QS_ALIAS/qs"
+
+cd "$(dirname "$0")/.."
+"$QMLLINT" -I "$OMARCHY_PATH/shell" -I "$QS_ALIAS" \
+  BarWidget.qml Panel.qml Service.qml LidService.qml \
+  TimeoutColumn.qml TimeoutSection.qml LidActionColumn.qml

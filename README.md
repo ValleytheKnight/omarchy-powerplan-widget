@@ -164,14 +164,30 @@ as root.
 ```sh
 npm test
 omarchy plugin validate .
-/usr/lib/qt6/bin/qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml Service.qml LidService.qml TimeoutColumn.qml TimeoutSection.qml LidActionColumn.qml
+./scripts/lint-qml
 ```
 
-Use the Qt6 `qmllint` explicitly. On a system with both Qt5 and Qt6
-installed, the plain `qmllint` on `PATH` usually resolves to Qt5's
-build (from `qt5-declarative`), which can't resolve this project's Qt6
-Quickshell module types and aborts silently instead of reporting an
-error.
+`lint-qml` calls Qt6's `qmllint` (`/usr/lib/qt6/bin/qmllint`) explicitly
+rather than whatever `qmllint` resolves to on `PATH`: on a system with
+both Qt5 and Qt6 installed, the plain command usually resolves to Qt5's
+build, which can't resolve this project's Qt6 Quickshell module types
+and aborts silently (no output, no crash dump) instead of reporting an
+error. It also aliases the `qs` namespace Quickshell registers for its
+own shell root at runtime, which a bare `-I` path can't resolve on its
+own; without that alias, every type `qs.Commons`/`qs.Ui` would have
+provided cascades into unrelated-looking warnings throughout every file.
+
+With both of those fixed, 39 warnings remain, all from typing this
+project doesn't own: the `bar` context object Quickshell hands every
+bar widget is typed as a plain `QtObject`, so member access on it can't
+be statically verified; the same is true of `Style.font` in the shared
+Omarchy shell's `Commons/Style.qml`, whose `font` property is a plain
+`QtObject` rather than a named type with declared properties; and
+`Quickshell.Io`'s `Process.exited` signal's second parameter type
+(`QProcess::ExitStatus`) isn't resolvable by qmllint even when a
+handler declares it explicitly (confirmed by testing a minimal handler
+in isolation), so every `onExited` handler warns regardless of what it
+does. None of these are fixable by editing this plugin's own files.
 
 ## Remove
 

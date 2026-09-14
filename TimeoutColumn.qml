@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Commons
 import qs.Ui
@@ -13,7 +14,6 @@ Column {
   property string stateLabel: ""
   property var presets: []
   property int currentSeconds: 0
-  property bool enabled: true
   property bool saving: false
   property bool panelOpen: false
   property color foreground: Color.foreground
