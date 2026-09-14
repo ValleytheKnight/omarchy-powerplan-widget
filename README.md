@@ -1,33 +1,5 @@
 # Power Plan
 
-Set screensaver, displays-off, auto-lock, sleep, hibernate, and lid-close
-behavior independently for plugged in versus on battery, from the Omarchy
-Quattro bar.
-
-![Power Plan screensaver, displays-off, auto-lock, and sleep settings, split by power state](preview.png)
-
-On laptops, Power Plan also shows lid-close actions, split the same way:
-
-![Power Plan laptop lid-close actions, split by power state](preview-laptop.png)
-
-![Power Plan panel, scrolled from top to bottom](demo.gif)
-
-Power Plan provides seven controls, each set independently for **Plugged in**
-and **On battery**:
-
-- **Lid close**: keeps the system default or does nothing, turns off the laptop display, suspends, or hibernates when the lid closes.
-- **Screen saver**: starts the screen saver after the selected period of inactivity.
-- **Displays off**: turns the displays off (DPMS) after the selected period of inactivity while respecting idle inhibitors.
-- **Auto-lock**: locks the session after the selected period of inactivity.
-- **Sleep**: suspends the computer after the selected period of inactivity while respecting idle inhibitors.
-- **Hibernate after sleep**: wakes a suspended computer after the selected delay and hibernates it.
-- **Power profile**: picks which Omarchy power profile applies on AC versus battery.
-
-Each timeout offers presets, Off, and a custom hours/minutes/seconds entry.
-Omarchy requires positive screen-saver and lock values, so Power Plan
-simulates Off with safe seven-day timeouts while displaying and persisting
-Off as `0`.
-
 ## Install
 
 ```sh
@@ -84,6 +56,36 @@ If needed, add it to the bar explicitly:
 ```sh
 omarchy bar plugin add valleytheknight.powerplan --section right
 ```
+
+## Overview
+
+Set screensaver, displays-off, auto-lock, sleep, hibernate, and lid-close
+behavior independently for plugged in versus on battery, from the Omarchy
+Quattro bar.
+
+![Power Plan screensaver, displays-off, auto-lock, and sleep settings, split by power state](preview.png)
+
+On laptops, Power Plan also shows lid-close actions, split the same way:
+
+![Power Plan laptop lid-close actions, split by power state](preview-laptop.png)
+
+![Power Plan panel, scrolled from top to bottom](demo.gif)
+
+Power Plan provides seven controls, each set independently for **Plugged in**
+and **On battery**:
+
+- **Lid close**: keeps the system default or does nothing, turns off the laptop display, suspends, or hibernates when the lid closes.
+- **Screen saver**: starts the screen saver after the selected period of inactivity.
+- **Displays off**: turns the displays off (DPMS) after the selected period of inactivity while respecting idle inhibitors.
+- **Auto-lock**: locks the session after the selected period of inactivity.
+- **Sleep**: suspends the computer after the selected period of inactivity while respecting idle inhibitors.
+- **Hibernate after sleep**: wakes a suspended computer after the selected delay and hibernates it.
+- **Power profile**: picks which Omarchy power profile applies on AC versus battery.
+
+Each timeout offers presets, Off, and a custom hours/minutes/seconds entry.
+Omarchy requires positive screen-saver and lock values, so Power Plan
+simulates Off with safe seven-day timeouts while displaying and persisting
+Off as `0`.
 
 ## Usage
 
