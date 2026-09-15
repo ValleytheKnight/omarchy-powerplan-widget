@@ -15,6 +15,12 @@ maintainer key once, add the repository to pacman.conf once, and from
 then on pacman verifies both the repository database and the package
 against that key on every install and upgrade.
 
+packaging/repo/ is an exact mirror of what the release serves: the six
+file names pacman can request, as real files. The marketplace rejects
+any repository containing a symlink, and repo-add produces symlinks by
+default, so the database is built in a scratch directory and only its
+real files are moved into place.
+
 After running this, commit packaging/repo/ and upload its contents to
 the GitHub release that hosts the repository. The exact upload command
 is printed at the end.
@@ -38,7 +44,14 @@ def run(cmd, **kwargs):
     subprocess.run(cmd, check=True, **kwargs)
 
 
-def verify(signature, target):
+def sign(key, target):
+    run([
+        "gpg", "--batch", "--yes", "--detach-sign",
+        "--local-user", key, "-o", f"{target}.sig", str(target),
+    ])
+
+
+def verify(target):
     """Confirm a detached signature really covers its target.
 
     repo-add reports a database signing failure as a warning and still
@@ -46,15 +59,15 @@ def verify(signature, target):
     successful one.
     """
     result = subprocess.run(
-        ["gpg", "--verify", str(signature), str(target)],
+        ["gpg", "--verify", f"{target}.sig", str(target)],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        print(f"release-helper: {signature} does not verify against {target}", file=sys.stderr)
+        print(f"release-helper: {target}.sig does not verify against {target}", file=sys.stderr)
         print(result.stderr.strip(), file=sys.stderr)
         sys.exit(1)
-    print(f"  verified {signature.name}")
+    print(f"  verified {target.name}")
 
 
 def main():
@@ -62,66 +75,56 @@ def main():
     parser.add_argument("--key", required=True, help="signing key fingerprint")
     args = parser.parse_args()
 
+    if REPO_DIR.exists():
+        for stale in REPO_DIR.iterdir():
+            stale.unlink()
+    REPO_DIR.mkdir(parents=True, exist_ok=True)
+
     with tempfile.TemporaryDirectory() as tmp:
         build_dir = Path(tmp)
         shutil.copy(PKGBUILD_DIR / "PKGBUILD", build_dir / "PKGBUILD")
-
         run(["makepkg", "-f"], cwd=build_dir)
 
         built = sorted(build_dir.glob("*.pkg.tar.zst"))
         if len(built) != 1:
             print(f"release-helper: expected exactly one built package, found {built}", file=sys.stderr)
             sys.exit(1)
-        built_pkg = built[0]
 
-        REPO_DIR.mkdir(parents=True, exist_ok=True)
-        for stale in REPO_DIR.iterdir():
-            stale.unlink()
+        pkg = REPO_DIR / built[0].name
+        shutil.copy(built[0], pkg)
+        sign(args.key, pkg)
 
-        pkg = REPO_DIR / built_pkg.name
-        shutil.copy(built_pkg, pkg)
+        # repo-add writes <name>.db.tar.gz plus a <name>.db symlink
+        # beside it. Build it out of tree so only the real files land
+        # in the published directory.
+        staging = build_dir / "db"
+        staging.mkdir()
+        run(
+            ["repo-add", "--sign", "--verify", "--key", args.key,
+             str(staging / f"{REPO_NAME}.db.tar.gz"), str(pkg)],
+            cwd=staging,
+        )
 
-    sig = pkg.with_name(pkg.name + ".sig")
-    run(["gpg", "--batch", "--yes", "--detach-sign", "--local-user", args.key, "-o", str(sig), str(pkg)])
-
-    database = REPO_DIR / f"{REPO_NAME}.db.tar.gz"
-    run(
-        ["repo-add", "--sign", "--verify", "--key", args.key, str(database), str(pkg)],
-        cwd=REPO_DIR,
-    )
-
-    # repo-add signs the database opportunistically and downgrades a
-    # failure to a warning, so sign anything it left unsigned rather
-    # than publishing a repository pacman will reject.
-    for name in (f"{REPO_NAME}.db.tar.gz", f"{REPO_NAME}.files.tar.gz"):
-        target = REPO_DIR / name
-        signature = REPO_DIR / f"{name}.sig"
-        if not signature.exists():
-            run([
-                "gpg", "--batch", "--yes", "--detach-sign",
-                "--local-user", args.key, "-o", str(signature), str(target),
-            ])
-        link = REPO_DIR / name.replace(".tar.gz", "")
-        link_sig = REPO_DIR / f"{link.name}.sig"
-        link_sig.unlink(missing_ok=True)
-        link_sig.symlink_to(signature.name)
+        for suffix in ("db", "files"):
+            source = staging / f"{REPO_NAME}.{suffix}.tar.gz"
+            target = REPO_DIR / f"{REPO_NAME}.{suffix}"
+            shutil.copy(source, target)
+            signature = Path(f"{source}.sig")
+            if signature.exists():
+                shutil.copy(signature, f"{target}.sig")
+            else:
+                sign(args.key, target)
 
     print("release-helper: verifying every signature before reporting success")
-    verify(sig, pkg)
-    for name in (f"{REPO_NAME}.db.tar.gz", f"{REPO_NAME}.files.tar.gz"):
-        verify(REPO_DIR / f"{name}.sig", REPO_DIR / name)
+    for target in sorted(REPO_DIR.iterdir()):
+        if target.suffix != ".sig":
+            verify(target)
 
-    # pacman requests these exact names, so they are what the release
-    # has to serve; the .tar.gz files behind the symlinks are not
-    # fetched by name and do not need uploading.
-    uploads = " ".join([
-        pkg.name,
-        sig.name,
-        f"{REPO_NAME}.db",
-        f"{REPO_NAME}.db.sig",
-        f"{REPO_NAME}.files",
-        f"{REPO_NAME}.files.sig",
-    ])
+    if any(target.is_symlink() for target in REPO_DIR.iterdir()):
+        print("release-helper: packaging/repo/ contains a symlink, which the marketplace rejects", file=sys.stderr)
+        sys.exit(1)
+
+    uploads = " ".join(sorted(target.name for target in REPO_DIR.iterdir()))
     print(f"\nrelease-helper: wrote {REPO_DIR}")
     print("release-helper: commit packaging/repo/, then publish the repository with:")
     print(f"  cd {REPO_DIR} && gh release upload {RELEASE_TAG} --clobber {uploads}")

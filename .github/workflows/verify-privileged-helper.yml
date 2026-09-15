@@ -54,7 +54,7 @@ jobs:
 
           # The repository is useless to pacman unless the database and
           # the package are both signed by the same maintainer key.
-          for target in "$PKG" packaging/repo/omarchy-powerplan.db.tar.gz packaging/repo/omarchy-powerplan.files.tar.gz; do
+          for target in "$PKG" packaging/repo/omarchy-powerplan.db packaging/repo/omarchy-powerplan.files; do
             gpg --batch --verify "$target.sig" "$target"
             echo "verified $target"
           done
@@ -85,12 +85,25 @@ jobs:
         run: |
           set -euo pipefail
           PKG="$(basename "$(ls packaging/repo/*.pkg.tar.zst)")"
-          if ! bsdtar -O -xf packaging/repo/omarchy-powerplan.db.tar.gz | grep -qx "$PKG"; then
+          if ! bsdtar -O -xf packaging/repo/omarchy-powerplan.db | grep -qx "$PKG"; then
             echo "The repository database does not reference $PKG."
             echo "Re-run scripts/release-helper so the database and package agree."
             exit 1
           fi
           echo "Repository database references $PKG."
+
+      - name: Confirm the repository contains no symlinks
+        run: |
+          set -euo pipefail
+          # Marketplace validation rejects a plugin repository containing
+          # any symlink, and repo-add creates them by default.
+          found="$(git ls-files -s | awk '$1=="120000"{print $4}')"
+          if [ -n "$found" ]; then
+            echo "Symlinks are not allowed anywhere in this repository:"
+            echo "$found"
+            exit 1
+          fi
+          echo "No symlinks tracked."
 
       - name: Run the test suite
         run: |
