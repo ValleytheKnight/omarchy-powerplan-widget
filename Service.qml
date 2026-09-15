@@ -69,8 +69,8 @@ Item {
     var url = String(Qt.resolvedUrl("powerplan.py"))
     return decodeURIComponent(url.indexOf("file://") === 0 ? url.substring(7) : url)
   }
-  // This helper is installed root-owned by scripts/install-privileged-helper;
-  // never execute plugin code through pkexec.
+  // This helper is installed root-owned by the omarchy-powerplan-helper
+  // package; never execute plugin code through pkexec.
   readonly property string hibernateHelperPath: "/usr/lib/omarchy-powerplan/powerplan-configure-hibernate"
 
   function runHelper(arguments) {

@@ -1,20 +1,23 @@
 #!/usr/bin/python3
 """Build and sign a release of the privileged helper package.
 
-Maintainer-only. Run this yourself, from the repository root, whenever
-`powerplan-configure-hibernate` changes and needs a new signed release:
+Maintainer-only. Run from the repository root whenever
+powerplan-configure-hibernate changes:
 
-    ./scripts/release-helper --key <YOUR_KEY_FINGERPRINT_OR_EMAIL>
+    ./scripts/release-helper --key A8238083DE096BC875CD1EB572BD2077B316056A
 
-This is not part of the security-critical install path end users run;
-it is the tool that produces the artifacts scripts/install-privileged-helper
-verifies. It builds unprivileged via makepkg, then signs the built
-package with `gpg --detach-sign` using your key (you'll be prompted for
-your passphrase), and writes both files into packaging/release/ under
-a fixed name so the installer doesn't need to know the current version.
+This builds the package with makepkg, signs it with a detached
+signature, and rebuilds the signed pacman repository database in
+packaging/repo/.
 
-After running this, commit packaging/release/omarchy-powerplan-helper.pkg.tar.zst
-and its .sig.
+End users never run this and never build anything. They trust the
+maintainer key once, add the repository to pacman.conf once, and from
+then on pacman verifies both the repository database and the package
+against that key on every install and upgrade.
+
+After running this, commit packaging/repo/ and upload its contents to
+the GitHub release that hosts the repository. The exact upload command
+is printed at the end.
 """
 import argparse
 import shutil
@@ -24,19 +27,39 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PKGBUILD_DIR = ROOT / "packaging" / "aur"
-RELEASE_DIR = ROOT / "packaging" / "release"
-CANONICAL_NAME = "omarchy-powerplan-helper.pkg.tar.zst"
+PKGBUILD_DIR = ROOT / "packaging" / "pkgbuild"
+REPO_DIR = ROOT / "packaging" / "repo"
+REPO_NAME = "omarchy-powerplan"
+RELEASE_TAG = "repo"
 
 
 def run(cmd, **kwargs):
-    print(f"+ {' '.join(cmd)}")
+    print(f"+ {' '.join(str(c) for c in cmd)}")
     subprocess.run(cmd, check=True, **kwargs)
+
+
+def verify(signature, target):
+    """Confirm a detached signature really covers its target.
+
+    repo-add reports a database signing failure as a warning and still
+    exits zero, so an unverified release would otherwise look like a
+    successful one.
+    """
+    result = subprocess.run(
+        ["gpg", "--verify", str(signature), str(target)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"release-helper: {signature} does not verify against {target}", file=sys.stderr)
+        print(result.stderr.strip(), file=sys.stderr)
+        sys.exit(1)
+    print(f"  verified {signature.name}")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--key", required=True, help="signing key fingerprint or identity")
+    parser.add_argument("--key", required=True, help="signing key fingerprint")
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -51,18 +74,57 @@ def main():
             sys.exit(1)
         built_pkg = built[0]
 
-        RELEASE_DIR.mkdir(parents=True, exist_ok=True)
-        dest_pkg = RELEASE_DIR / CANONICAL_NAME
-        dest_sig = RELEASE_DIR / f"{CANONICAL_NAME}.sig"
-        shutil.copy(built_pkg, dest_pkg)
+        REPO_DIR.mkdir(parents=True, exist_ok=True)
+        for stale in REPO_DIR.iterdir():
+            stale.unlink()
 
-        run([
-            "gpg", "--detach-sign", "--local-user", args.key,
-            "-o", str(dest_sig), str(dest_pkg),
-        ])
+        pkg = REPO_DIR / built_pkg.name
+        shutil.copy(built_pkg, pkg)
 
-    print(f"release-helper: wrote {dest_pkg} and {dest_sig}")
-    print("release-helper: verify, then commit both files.")
+    sig = pkg.with_name(pkg.name + ".sig")
+    run(["gpg", "--batch", "--yes", "--detach-sign", "--local-user", args.key, "-o", str(sig), str(pkg)])
+
+    database = REPO_DIR / f"{REPO_NAME}.db.tar.gz"
+    run(
+        ["repo-add", "--sign", "--verify", "--key", args.key, str(database), str(pkg)],
+        cwd=REPO_DIR,
+    )
+
+    # repo-add signs the database opportunistically and downgrades a
+    # failure to a warning, so sign anything it left unsigned rather
+    # than publishing a repository pacman will reject.
+    for name in (f"{REPO_NAME}.db.tar.gz", f"{REPO_NAME}.files.tar.gz"):
+        target = REPO_DIR / name
+        signature = REPO_DIR / f"{name}.sig"
+        if not signature.exists():
+            run([
+                "gpg", "--batch", "--yes", "--detach-sign",
+                "--local-user", args.key, "-o", str(signature), str(target),
+            ])
+        link = REPO_DIR / name.replace(".tar.gz", "")
+        link_sig = REPO_DIR / f"{link.name}.sig"
+        link_sig.unlink(missing_ok=True)
+        link_sig.symlink_to(signature.name)
+
+    print("release-helper: verifying every signature before reporting success")
+    verify(sig, pkg)
+    for name in (f"{REPO_NAME}.db.tar.gz", f"{REPO_NAME}.files.tar.gz"):
+        verify(REPO_DIR / f"{name}.sig", REPO_DIR / name)
+
+    # pacman requests these exact names, so they are what the release
+    # has to serve; the .tar.gz files behind the symlinks are not
+    # fetched by name and do not need uploading.
+    uploads = " ".join([
+        pkg.name,
+        sig.name,
+        f"{REPO_NAME}.db",
+        f"{REPO_NAME}.db.sig",
+        f"{REPO_NAME}.files",
+        f"{REPO_NAME}.files.sig",
+    ])
+    print(f"\nrelease-helper: wrote {REPO_DIR}")
+    print("release-helper: commit packaging/repo/, then publish the repository with:")
+    print(f"  cd {REPO_DIR} && gh release upload {RELEASE_TAG} --clobber {uploads}")
 
 
 if __name__ == "__main__":

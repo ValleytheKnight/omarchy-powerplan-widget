@@ -1,0 +1,1 @@
+omarchy-powerplan.files.tar.gz.sig

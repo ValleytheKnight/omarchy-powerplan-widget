@@ -6,52 +6,75 @@
 omarchy plugin add https://github.com/ValleytheKnight/omarchy-powerplan-widget.git --enable
 ```
 
-The privileged helper installs as a pacman package signed by the
-maintainer's key, not built or self-signed on your machine:
+That is the whole plugin. Everything except the hibernate delay works
+with no further setup.
+
+### Hibernate delay (optional)
+
+Setting a hibernate delay writes to `/etc/systemd/sleep.conf.d/`, so it
+needs a small root-owned helper. The helper is distributed as a signed
+package from a pacman repository, the same way any third-party Arch
+repository distributes software.
+
+Trust the signing key once per machine. It is fetched from a public
+keyserver, not from this repository:
 
 ```sh
-git clone https://github.com/ValleytheKnight/omarchy-powerplan-widget.git
-cd omarchy-powerplan-widget
-```
-
-Before your first install on a given machine, trust that key once, the
-same way you'd trust any third-party repository's signing key:
-
-```sh
-sudo pacman-key --add packaging/keys/valleytheknight-powerplan.asc
+sudo pacman-key --keyserver hkps://keyserver.ubuntu.com --recv-keys A8238083DE096BC875CD1EB572BD2077B316056A
 sudo pacman-key --lsign-key A8238083DE096BC875CD1EB572BD2077B316056A
 ```
 
-One-time per machine. After this, every install or update from this
-key is verified automatically, no repeated trust decision.
+Add the repository to `/etc/pacman.conf`:
+
+```ini
+[omarchy-powerplan]
+SigLevel = Required TrustedOnly
+Server = https://github.com/ValleytheKnight/omarchy-powerplan-widget/releases/download/repo
+```
 
 Then install the helper, and restart the shell if it is already
 running:
 
 ```sh
-./scripts/install-privileged-helper
+sudo pacman -Syu omarchy-powerplan-helper
 omarchy restart shell
 ```
 
-`install-privileged-helper` runs as your own user. It reads the
-pre-built, pre-signed package and its signature from
-`packaging/release/` once, then pipes those exact bytes to a single
-`pkexec` command. This script's own interpreter, `pkexec`, and the
-shell it runs are all invoked by absolute path, never resolved through
-this process's own `PATH`. Root stages the bytes in a directory it
-creates itself, verifies the signature against pacman's own trusted
-keyring with `pacman-key --verify`, and only then runs `pacman -U`.
-Any tampering or truncation invalidates the signature, so the
-signature check covers the whole package, not a piece of it, and root
-never installs anything that wasn't verified against the key you
-trusted above.
+Later upgrades arrive through `pacman -Syu` like any other package.
 
-Residual: a local process that can already write to your clone could
-still rewrite the installer itself before you run it. No install
-script can protect against that; it's the same trust the first command
-you ever type from a checkout always requires.
+#### What is trusted, and what is not
 
-If needed, add it to the bar explicitly:
+No step above reads anything from a clone of this repository. The key
+comes from a public keyserver. The repository database and the package
+come from GitHub over TLS. Both are verified by pacman against the key
+you locally signed, using pacman's own root-owned keyring, under the
+`SigLevel` pinned in the stanza you added to root-owned
+`/etc/pacman.conf` rather than whatever your defaults happen to be.
+`Required TrustedOnly` makes a missing or invalid signature a fatal
+error instead of a warning.
+
+The only value you have to get right is the 40-character fingerprint.
+It is the entire trust anchor. `pacman-key --lsign-key` grants trust to
+the key with exactly that fingerprint and to no other, so substituted
+key material cannot become trusted regardless of where its bytes came
+from. That fingerprint is published on the keyserver above and on this
+repository's release page. Check it against one of those rather than
+against a file on your own machine.
+
+Residual risk: anything already running as your user can rewrite this
+README before you read it, including the fingerprint printed in it, and
+can reuse a cached `sudo` credential from the commands above to run
+pacman directly. No install document closes that, which is why the
+fingerprint is also published somewhere other than this machine. This is
+the same bootstrap that every third-party Arch repository and every
+distribution keyring depends on.
+
+Two limits worth naming. pacman has no per-repository key pinning, so a
+locally signed key is trusted for any package, not only this one. And
+`omarchy-powerplan-helper` contains one Python script and no install
+scriptlet, so installing it runs no code as root.
+
+If needed, add the plugin to the bar explicitly:
 
 ```sh
 omarchy bar plugin add valleytheknight.powerplan --section right
