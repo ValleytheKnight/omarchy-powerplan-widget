@@ -38,17 +38,25 @@ sha256sum omarchy-powerplan-helper-0.1.0-1-any.pkg.tar.zst
 # must print 216b653ab15529f967e0fe98f5c6999e8e5bf3ea6d91f4460ace621665c0692e
 ```
 
-Then install it, and restart the shell if it is already running:
+Verify the detached signature against the key you just trusted, using
+pacman's own keyring. Do this explicitly rather than relying on
+`pacman -U` to check it: a stock pacman.conf sets `LocalFileSigLevel =
+Optional`, which only checks a signature if one happens to be present
+and does not fail if it is missing, so a `pacman -U` on a local file is
+not a reliable signature gate on its own:
+
+```sh
+pacman-key --verify omarchy-powerplan-helper-0.1.0-1-any.pkg.tar.zst.sig omarchy-powerplan-helper-0.1.0-1-any.pkg.tar.zst
+```
+
+That command must report the signature as good against the fingerprint
+above before you continue. Then install it, and restart the shell if it
+is already running:
 
 ```sh
 sudo pacman -U ./omarchy-powerplan-helper-0.1.0-1-any.pkg.tar.zst
 omarchy restart shell
 ```
-
-`pacman -U` also checks the package's detached signature against the
-key you locally signed before it will install anything, so the digest
-check above and pacman's own signature check are independent of each
-other.
 
 A later helper version is a new pkgver, a new tag, a new published
 SHA-256, and a new security review, not an automatic upgrade under this
@@ -61,9 +69,12 @@ repository stanza points pacman at it.
 No step above reads anything from a clone of this repository. The key
 comes from a public keyserver. The package comes from a specific,
 versioned GitHub release URL over TLS, verified two ways before it
-touches anything: the SHA-256 you check by hand, and the detached
-signature `pacman -U` checks against the key you locally signed, using
-pacman's own root-owned keyring.
+touches anything: the SHA-256 you check by hand, and the explicit
+`pacman-key --verify` against the key you locally signed, using
+pacman's own root-owned keyring. Both run before `pacman -U`, not
+instead of it; `pacman -U`'s own signature handling on a local file is
+optional by default on a stock pacman.conf and is not treated here as
+the thing actually gating the install.
 
 The only value you have to get right is the 40-character fingerprint.
 It is the entire trust anchor for the key. `pacman-key --lsign-key`

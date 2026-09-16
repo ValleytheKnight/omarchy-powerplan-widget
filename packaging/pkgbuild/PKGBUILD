@@ -1,10 +1,10 @@
 # Maintainer: ValleytheKnight
 #
 # This PKGBUILD is used by the maintainer to build each release of the
-# privileged helper before signing it (see packaging/repo/ and
+# privileged helper before signing it (see packaging/release/ and
 # scripts/release-helper). End users do not run makepkg themselves;
-# they install the signed package from the pacman repository. See
-# README.md.
+# they download and verify this exact signed package from its versioned
+# GitHub release. See README.md.
 pkgname=omarchy-powerplan-helper
 pkgver=0.1.0
 pkgrel=1

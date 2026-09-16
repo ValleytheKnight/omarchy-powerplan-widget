@@ -98,6 +98,20 @@ jobs:
           fi
           echo "No repository-channel install instructions present."
 
+      - name: Confirm README requires an explicit signature check before install
+        run: |
+          set -euo pipefail
+          # A stock pacman.conf sets LocalFileSigLevel = Optional, so
+          # `pacman -U` on a local file does not reliably enforce the
+          # signature on its own. README must not rely on it alone.
+          if ! grep -q 'pacman-key --verify' README.md; then
+            echo "README.md no longer tells users to run pacman-key --verify before"
+            echo "pacman -U. Without it, install-time signature checking is optional"
+            echo "on a stock pacman.conf and the SHA-256 becomes the only real check."
+            exit 1
+          fi
+          echo "README.md requires an explicit pacman-key --verify before install."
+
       - name: Confirm the repository contains no symlinks
         run: |
           set -euo pipefail
