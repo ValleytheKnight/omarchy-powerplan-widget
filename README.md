@@ -12,9 +12,11 @@ with no further setup.
 ### Hibernate delay (optional)
 
 Setting a hibernate delay writes to `/etc/systemd/sleep.conf.d/`, so it
-needs a small root-owned helper. The helper is distributed as a signed
-package from a pacman repository, the same way any third-party Arch
-repository distributes software.
+needs a small root-owned helper. The helper is one exact, signed
+package, `omarchy-powerplan-helper` **0.1.0**. There is no pacman
+repository and no `pacman -Syu` for it: installing it is a deliberate,
+one-time action bound to this exact version, not a channel that can
+later serve different bytes under the same trust.
 
 Trust the signing key once per machine. It is fetched from a public
 keyserver, not from this repository:
@@ -24,55 +26,69 @@ sudo pacman-key --keyserver hkps://keyserver.ubuntu.com --recv-keys A8238083DE09
 sudo pacman-key --lsign-key A8238083DE096BC875CD1EB572BD2077B316056A
 ```
 
-Add the repository to `/etc/pacman.conf`:
-
-```ini
-[omarchy-powerplan]
-SigLevel = Required TrustedOnly
-Server = https://github.com/ValleytheKnight/omarchy-powerplan-widget/releases/download/repo
-```
-
-Then install the helper, and restart the shell if it is already
-running:
+Download this version's package and verify its digest before
+installing it. The published SHA-256 below is the trust anchor for
+these bytes; check it against this file and against the release page,
+not only the number printed by the download:
 
 ```sh
-sudo pacman -Syu omarchy-powerplan-helper
+curl -LO https://github.com/ValleytheKnight/omarchy-powerplan-widget/releases/download/helper-v0.1.0/omarchy-powerplan-helper-0.1.0-1-any.pkg.tar.zst
+curl -LO https://github.com/ValleytheKnight/omarchy-powerplan-widget/releases/download/helper-v0.1.0/omarchy-powerplan-helper-0.1.0-1-any.pkg.tar.zst.sig
+sha256sum omarchy-powerplan-helper-0.1.0-1-any.pkg.tar.zst
+# must print 216b653ab15529f967e0fe98f5c6999e8e5bf3ea6d91f4460ace621665c0692e
+```
+
+Then install it, and restart the shell if it is already running:
+
+```sh
+sudo pacman -U ./omarchy-powerplan-helper-0.1.0-1-any.pkg.tar.zst
 omarchy restart shell
 ```
 
-Later upgrades arrive through `pacman -Syu` like any other package.
+`pacman -U` also checks the package's detached signature against the
+key you locally signed before it will install anything, so the digest
+check above and pacman's own signature check are independent of each
+other.
+
+A later helper version is a new pkgver, a new tag, a new published
+SHA-256, and a new security review, not an automatic upgrade under this
+approval. Check this page again before moving to one; do not run a
+blanket `pacman -Syu` expecting it to reach this package, since no
+repository stanza points pacman at it.
 
 #### What is trusted, and what is not
 
 No step above reads anything from a clone of this repository. The key
-comes from a public keyserver. The repository database and the package
-come from GitHub over TLS. Both are verified by pacman against the key
-you locally signed, using pacman's own root-owned keyring, under the
-`SigLevel` pinned in the stanza you added to root-owned
-`/etc/pacman.conf` rather than whatever your defaults happen to be.
-`Required TrustedOnly` makes a missing or invalid signature a fatal
-error instead of a warning.
+comes from a public keyserver. The package comes from a specific,
+versioned GitHub release URL over TLS, verified two ways before it
+touches anything: the SHA-256 you check by hand, and the detached
+signature `pacman -U` checks against the key you locally signed, using
+pacman's own root-owned keyring.
 
 The only value you have to get right is the 40-character fingerprint.
-It is the entire trust anchor. `pacman-key --lsign-key` grants trust to
-the key with exactly that fingerprint and to no other, so substituted
-key material cannot become trusted regardless of where its bytes came
-from. That fingerprint is published on the keyserver above and on this
-repository's release page. Check it against one of those rather than
-against a file on your own machine.
+It is the entire trust anchor for the key. `pacman-key --lsign-key`
+grants trust to the key with exactly that fingerprint and to no other,
+so substituted key material cannot become trusted regardless of where
+its bytes came from. That fingerprint is published on the keyserver
+above and on this repository's release page. Check it against one of
+those rather than against a file on your own machine. The published
+SHA-256 is the separate anchor for which package those trusted
+signatures are allowed to belong to; both have to match.
 
 Residual risk: anything already running as your user can rewrite this
-README before you read it, including the fingerprint printed in it, and
-can reuse a cached `sudo` credential from the commands above to run
-pacman directly. No install document closes that, which is why the
-fingerprint is also published somewhere other than this machine. This is
-the same bootstrap that every third-party Arch repository and every
-distribution keyring depends on.
+README before you read it, including the fingerprint and digest printed
+in it, and can reuse a cached `sudo` credential from the commands above
+to run pacman directly. No install document closes that, which is why
+the fingerprint is also published somewhere other than this machine.
+This is the same bootstrap that every third-party Arch package and
+every distribution keyring depends on.
 
-Two limits worth naming. pacman has no per-repository key pinning, so a
-locally signed key is trusted for any package, not only this one. And
-`omarchy-powerplan-helper` contains one Python script and no install
-scriptlet, so installing it runs no code as root.
+Two limits worth naming. pacman has no per-package key pinning, so a
+locally signed key is trusted for any package presented to `pacman -U`,
+not only this one; that is exactly why installing a specific,
+digest-verified file rather than pointing pacman at a repository
+matters here. And `omarchy-powerplan-helper` contains one Python script
+and no install scriptlet, so installing it runs no code as root.
 
 If needed, add the plugin to the bar explicitly:
 

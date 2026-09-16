@@ -42,27 +42,22 @@ jobs:
           fi
           echo "PKGBUILD sha256sums matches powerplan-configure-hibernate ($actual)."
 
-      - name: Verify every signature in the published pacman repository
+      - name: Verify the release package's signature
         run: |
           set -euo pipefail
           KEY=packaging/keys/valleytheknight-powerplan.asc
-          PKG="$(ls packaging/repo/*.pkg.tar.zst)"
+          PKG="$(ls packaging/release/*.pkg.tar.zst)"
 
           GNUPGHOME=$(mktemp -d)
           export GNUPGHOME
           gpg --batch --import "$KEY"
-
-          # The repository is useless to pacman unless the database and
-          # the package are both signed by the same maintainer key.
-          for target in "$PKG" packaging/repo/omarchy-powerplan.db packaging/repo/omarchy-powerplan.files; do
-            gpg --batch --verify "$target.sig" "$target"
-            echo "verified $target"
-          done
+          gpg --batch --verify "$PKG.sig" "$PKG"
+          echo "verified $PKG"
 
       - name: Confirm the packaged helper matches the tracked source
         run: |
           set -euo pipefail
-          PKG="$(ls packaging/repo/*.pkg.tar.zst)"
+          PKG="$(ls packaging/release/*.pkg.tar.zst)"
           bsdtar -O -xf "$PKG" usr/lib/omarchy-powerplan/powerplan-configure-hibernate > extracted-helper
           if ! cmp -s extracted-helper powerplan-configure-hibernate; then
             echo "The helper inside the published package does not match the tracked"
@@ -74,29 +69,40 @@ jobs:
       - name: Confirm the package ships no install scriptlet
         run: |
           set -euo pipefail
-          PKG="$(ls packaging/repo/*.pkg.tar.zst)"
+          PKG="$(ls packaging/release/*.pkg.tar.zst)"
           if bsdtar -tf "$PKG" | grep -qx '.INSTALL'; then
             echo "The package contains an .INSTALL scriptlet, which would run as root."
             exit 1
           fi
           echo "No install scriptlet present."
 
-      - name: Confirm the repository database lists the published package
+      - name: Confirm README's published digest matches the released package
         run: |
           set -euo pipefail
-          PKG="$(basename "$(ls packaging/repo/*.pkg.tar.zst)")"
-          if ! bsdtar -O -xf packaging/repo/omarchy-powerplan.db | grep -qx "$PKG"; then
-            echo "The repository database does not reference $PKG."
-            echo "Re-run scripts/release-helper so the database and package agree."
+          PKG="$(ls packaging/release/*.pkg.tar.zst)"
+          actual="$(sha256sum "$PKG" | cut -d' ' -f1)"
+          if ! grep -qx "# must print $actual" README.md; then
+            echo "README.md does not show the current package's SHA-256 ($actual)."
+            echo "Update the install instructions after re-running scripts/release-helper."
             exit 1
           fi
-          echo "Repository database references $PKG."
+          echo "README.md digest matches the released package ($actual)."
+
+      - name: Confirm no unrelated repository stanza or -Syu instruction remains
+        run: |
+          set -euo pipefail
+          if grep -q '^\[omarchy-powerplan\]' README.md || grep -q 'pacman -Syu omarchy-powerplan-helper' README.md; then
+            echo "README.md still describes a pacman repository / -Syu upgrade path for the"
+            echo "helper. That model cannot bind installation to one reviewed version."
+            exit 1
+          fi
+          echo "No repository-channel install instructions present."
 
       - name: Confirm the repository contains no symlinks
         run: |
           set -euo pipefail
           # Marketplace validation rejects a plugin repository containing
-          # any symlink, and repo-add creates them by default.
+          # any symlink.
           found="$(git ls-files -s | awk '$1=="120000"{print $4}')"
           if [ -n "$found" ]; then
             echo "Symlinks are not allowed anywhere in this repository:"

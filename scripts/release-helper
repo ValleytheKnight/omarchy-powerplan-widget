@@ -1,31 +1,28 @@
 #!/usr/bin/python3
-"""Build and sign a release of the privileged helper package.
+"""Build and sign one immutable release of the privileged helper.
 
 Maintainer-only. Run from the repository root whenever
 powerplan-configure-hibernate changes:
 
     ./scripts/release-helper --key A8238083DE096BC875CD1EB572BD2077B316056A
 
-This builds the package with makepkg, signs it with a detached
-signature, and rebuilds the signed pacman repository database in
-packaging/repo/.
+This builds the package with makepkg and signs it with a detached
+signature. The result is one exact, versioned artifact: a specific
+pkgver's package plus its signature, nothing else.
 
-End users never run this and never build anything. They trust the
-maintainer key once, add the repository to pacman.conf once, and from
-then on pacman verifies both the repository database and the package
-against that key on every install and upgrade.
+There is deliberately no pacman repository and no rolling "latest"
+channel. Each pkgver in packaging/pkgbuild/PKGBUILD gets its own GitHub
+release tag (helper-v<pkgver>) and its own immutable download URL, so a
+security review of one submission can never be stretched to cover a
+later helper nobody reviewed. Moving a user to a new helper version
+means writing a new commit, a new README section with a new SHA-256,
+and going through review again, not an unattended pacman -Syu.
 
-packaging/repo/ is an exact mirror of what the release serves: the six
-file names pacman can request, as real files. The marketplace rejects
-any repository containing a symlink, and repo-add produces symlinks by
-default, so the database is built in a scratch directory and only its
-real files are moved into place.
-
-After running this, commit packaging/repo/ and upload its contents to
-the GitHub release that hosts the repository. The exact upload command
-is printed at the end.
+After running this, commit packaging/release/ and publish it with the
+exact command printed at the end.
 """
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -34,14 +31,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PKGBUILD_DIR = ROOT / "packaging" / "pkgbuild"
-REPO_DIR = ROOT / "packaging" / "repo"
-REPO_NAME = "omarchy-powerplan"
-RELEASE_TAG = "repo"
+PKGBUILD = PKGBUILD_DIR / "PKGBUILD"
+RELEASE_DIR = ROOT / "packaging" / "release"
 
 
 def run(cmd, **kwargs):
     print(f"+ {' '.join(str(c) for c in cmd)}")
     subprocess.run(cmd, check=True, **kwargs)
+
+
+def pkgver():
+    match = re.search(r"^pkgver=(\S+)$", PKGBUILD.read_text(), flags=re.MULTILINE)
+    if not match:
+        print(f"release-helper: no pkgver= line found in {PKGBUILD}", file=sys.stderr)
+        sys.exit(1)
+    return match.group(1)
 
 
 def sign(key, target):
@@ -52,11 +56,10 @@ def sign(key, target):
 
 
 def verify(target):
-    """Confirm a detached signature really covers its target.
+    """Confirm the detached signature really covers the package.
 
-    repo-add reports a database signing failure as a warning and still
-    exits zero, so an unverified release would otherwise look like a
-    successful one.
+    A signing step that silently no-ops would otherwise look identical
+    to a successful one until an end user's own verification failed.
     """
     result = subprocess.run(
         ["gpg", "--verify", f"{target}.sig", str(target)],
@@ -75,14 +78,17 @@ def main():
     parser.add_argument("--key", required=True, help="signing key fingerprint")
     args = parser.parse_args()
 
-    if REPO_DIR.exists():
-        for stale in REPO_DIR.iterdir():
+    version = pkgver()
+    tag = f"helper-v{version}"
+
+    if RELEASE_DIR.exists():
+        for stale in RELEASE_DIR.iterdir():
             stale.unlink()
-    REPO_DIR.mkdir(parents=True, exist_ok=True)
+    RELEASE_DIR.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmp:
         build_dir = Path(tmp)
-        shutil.copy(PKGBUILD_DIR / "PKGBUILD", build_dir / "PKGBUILD")
+        shutil.copy(PKGBUILD, build_dir / "PKGBUILD")
         run(["makepkg", "-f"], cwd=build_dir)
 
         built = sorted(build_dir.glob("*.pkg.tar.zst"))
@@ -90,44 +96,29 @@ def main():
             print(f"release-helper: expected exactly one built package, found {built}", file=sys.stderr)
             sys.exit(1)
 
-        pkg = REPO_DIR / built[0].name
+        pkg = RELEASE_DIR / built[0].name
         shutil.copy(built[0], pkg)
         sign(args.key, pkg)
 
-        # repo-add writes <name>.db.tar.gz plus a <name>.db symlink
-        # beside it. Build it out of tree so only the real files land
-        # in the published directory.
-        staging = build_dir / "db"
-        staging.mkdir()
-        run(
-            ["repo-add", "--sign", "--verify", "--key", args.key,
-             str(staging / f"{REPO_NAME}.db.tar.gz"), str(pkg)],
-            cwd=staging,
-        )
+    print("release-helper: verifying the signature before reporting success")
+    verify(pkg)
 
-        for suffix in ("db", "files"):
-            source = staging / f"{REPO_NAME}.{suffix}.tar.gz"
-            target = REPO_DIR / f"{REPO_NAME}.{suffix}"
-            shutil.copy(source, target)
-            signature = Path(f"{source}.sig")
-            if signature.exists():
-                shutil.copy(signature, f"{target}.sig")
-            else:
-                sign(args.key, target)
-
-    print("release-helper: verifying every signature before reporting success")
-    for target in sorted(REPO_DIR.iterdir()):
-        if target.suffix != ".sig":
-            verify(target)
-
-    if any(target.is_symlink() for target in REPO_DIR.iterdir()):
-        print("release-helper: packaging/repo/ contains a symlink, which the marketplace rejects", file=sys.stderr)
+    if any(target.is_symlink() for target in RELEASE_DIR.iterdir()):
+        print("release-helper: packaging/release/ contains a symlink, which the marketplace rejects", file=sys.stderr)
         sys.exit(1)
 
-    uploads = " ".join(sorted(target.name for target in REPO_DIR.iterdir()))
-    print(f"\nrelease-helper: wrote {REPO_DIR}")
-    print("release-helper: commit packaging/repo/, then publish the repository with:")
-    print(f"  cd {REPO_DIR} && gh release upload {RELEASE_TAG} --clobber {uploads}")
+    digest = subprocess.run(
+        ["sha256sum", pkg.name], cwd=RELEASE_DIR, capture_output=True, text=True, check=True,
+    ).stdout.split()[0]
+
+    print(f"\nrelease-helper: wrote {RELEASE_DIR}")
+    print(f"release-helper: pkgver {version}, sha256 {digest}")
+    print("release-helper: put that exact sha256 in README.md, commit packaging/release/,")
+    print("release-helper: then publish this one version with:")
+    print(f"  gh release create {tag} packaging/release/{pkg.name} packaging/release/{pkg.name}.sig "
+          f"--title 'omarchy-powerplan-helper {version}' --notes 'Signed helper package for pkgver {version}.'")
+    print("release-helper: never reuse this tag for a different pkgver. A new helper version")
+    print("release-helper: gets a new pkgver, a new tag, and a new security review.")
 
 
 if __name__ == "__main__":
